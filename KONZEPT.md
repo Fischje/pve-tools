@@ -116,6 +116,19 @@ Fährt der Server herunter, wird ein laufender Selbsttest abgebrochen (im Testpr
    Läuft der LXC auf einem Gerät, das durchläuft, während der Ziel-Host schläft, wird nur auf Erreichbarkeit
    des Hosts reagiert.
 
+#### Beispielrechnung (deine 12-TB-Exos)
+
+Die Platte nennt 1079 Minuten (≈ 18 Stunden) für einen Langtest. Bei Betriebsfenster 07:00–22:00
+bleiben nach 20 Minuten Anlaufzeit und 30 Minuten Sicherheitsabstand rund 14 Stunden Testzeit pro Tag.
+
+- Pro Platte: 18 h ÷ 14 h ⇒ **2 Tage** (ein Abschnitt am ersten Tag, der Rest am zweiten).
+- Sechs HDDs nacheinander: 6 × 18 h = 108 h ⇒ **etwa 8 Testtage**, ohne gesperrte Wochentage (mit Montag gesperrt
+  sind es 9 Kalendertage). Bei 3 Monaten Intervall passt das gut, der Langtest ist nur gut eine Woche pro Quartal aktiv.
+- Die 1079 Minuten gelten für eine ruhende Platte. Läuft nebenher Last (Backups, VMs), wird der Test langsamer. Das
+  Tool misst die tatsächliche Geschwindigkeit pro Abschnitt und plant mit dem gemessenen Wert weiter.
+- Während eines Langtests ist die Platte etwas langsamer. Auf dem PBS fällt das bei laufendem Backup auf; deshalb sind
+  Sperrzeiten einstellbar.
+
 #### Ergebnis und Anzeige
 
 - Ein fehlgeschlagener Test (z. B. „read failure“) lässt die Stufe auf mindestens „Bald tauschen“ steigen.
@@ -294,7 +307,7 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
 - Wann genau läuft der PVE-Host (Hochfahren/Herunterfahren) und wann der PBS? Laufen beide im gleichen Rhythmus?
   Das sind die Voreinstellungen fürs Betriebsfenster.
 - Gibt es Sperrzeiten innerhalb des Fensters (z. B. Backup-Fenster auf dem PBS)?
-- Wie lange dauert ein Langtest deiner Platten laut `smartctl -c` (Zeile „Extended self-test routine recommended
-  polling time“)? Daraus ergibt sich, in wie viele Tage er geteilt wird.
+- Langtest-Dauer ist bekannt (Exos: 1079 min). Fehlt noch für die zweite Exos-Variante (ST12000NM0248) und die
+  Lexar-NVMe; das Tool liest den Wert ohnehin selbst aus.
 - Wird der Server automatisch heruntergefahren (Zeitplan im BIOS/Skript) oder von Hand?
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
