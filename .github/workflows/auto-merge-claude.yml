@@ -1,0 +1,61 @@
+# Weg einer Änderung (wie bei den anderen Projekten): Push auf einen Zweig claude/** -> Tests und Secret-Scan -> Merge nach main.
+# Bei einem Fund oder einem fehlgeschlagenen Test wird nicht gemergt und damit nichts ausgeliefert.
+# Der LXC holt main danach alle 5 Minuten selbst (sync.sh, Einrichtung: install-sync.sh).
+name: Auto-Merge claude/** nach main
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: write
+
+# Nacheinander, nie zwei Merges gleichzeitig.
+concurrency:
+  group: auto-merge-main
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Tests
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "CI"
+          npm test
+
+      - name: gitleaks installieren
+        run: |
+          curl -sSL -o /tmp/gl.tgz https://github.com/gitleaks/gitleaks/releases/download/v8.28.0/gitleaks_8.28.0_linux_x64.tar.gz
+          echo "a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb  /tmp/gl.tgz" | sha256sum -c -
+          sudo tar xzf /tmp/gl.tgz -C /usr/local/bin gitleaks
+
+      - name: Secret-Scan der neuen Commits
+        run: |
+          if git rev-parse -q --verify refs/remotes/origin/main >/dev/null; then
+            gitleaks git --no-banner --redact --config .gitleaks.toml --log-opts="origin/main..HEAD" .
+          else
+            gitleaks git --no-banner --redact --config .gitleaks.toml .
+          fi
+
+      - name: Nach main mergen
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          if git rev-parse -q --verify refs/remotes/origin/main >/dev/null; then
+            git checkout -q -B main origin/main
+            git merge --no-edit -m "Merge ${GITHUB_REF_NAME} in main" "${GITHUB_SHA}"
+            git push origin main
+          else
+            # main gibt es noch nicht: aus diesem Zweig anlegen.
+            git push origin "${GITHUB_SHA}:refs/heads/main"
+          fi

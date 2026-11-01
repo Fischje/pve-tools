@@ -1,0 +1,21 @@
+# gitleaks-Regeln (übernommen aus dem Palast). Standardregeln plus eine Regel für
+# Passwort-Zuweisungen (VAR_PASSWORD=wert), die gitleaks sonst übersieht.
+title = "pve-disk-tool"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "palast-passwort-zuweisung"
+description = "Passwort-Zuweisung mit konkretem Wert"
+regex = '''(?i)\b[a-z0-9_]*(?:password|passwort|passwd|pwd)[a-z0-9_]*["']?[ \t]*[:=][ \t]*["']?([^\s"'$<>{}()\\&][^\s"'<>]{2,})'''
+secretGroup = 1
+keywords = ["password", "passwort", "passwd", "pwd"]
+
+  # Offensichtliche Platzhalter sind kein Fund.
+  [rules.allowlist]
+  # Nur diese Regel: In Tests und im Browsercode stehen Variablennamen wie "password: pw.value" und erfundene Testwerte.
+  # Die gitleaks-Standardregeln (Schlüssel, Tokens, …) gelten weiterhin für alle Dateien.
+  paths = ['''^test/''', '''^web/app\.js$''']
+  regexTarget = "secret"
+  regexes = ['''(?i)(hier|dein|deine|your|example|beispiel|changeme|xxx|platzhalter|geheim|passwort|password|secret|\*{3,}|\.{3,})''']

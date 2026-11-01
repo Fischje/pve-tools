@@ -131,10 +131,38 @@ Oder mit Docker: `cp .env.example .env`, `BIND_IP` anpassen, dann `docker compos
 Die Seite ist dann unter `http://192.168.1.20:8080` erreichbar. **Setze gleich unter „Zeitplan & Konto“ ein Passwort.** Danach kannst du unter „Hosts“ deine Proxmox-Hosts einrichten (siehe Abschnitt 3).
 Das Tool beantwortet ohnehin nur Anfragen aus dem lokalen Netz.
 
-## 5. Sichern und aktualisieren
+## 5. Automatischer Abgleich (wie bei den anderen Projekten)
+
+Der Weg einer Änderung ist derselbe wie bei deinen Webseiten und dem Discord-Bot:
+
+1. Claude (oder du) pusht auf einen Zweig `claude/**`.
+2. Der Workflow `.github/workflows/auto-merge-claude.yml` lässt die Tests laufen, prüft die neuen Commits mit gitleaks (Regeln aus dem Palast,
+   `.gitleaks.toml`) und mergt bei sauberem Ergebnis nach `main`. Bei einem Fund oder fehlgeschlagenen Tests wird nicht gemergt.
+3. Im LXC holt `sync.sh` alle 5 Minuten `main` per Fast-Forward. Neu gegenüber den Webseiten: Weil das Tool ein Dienst ist, führt es dafür
+   `update.sh` aus (Tests, Datenbanksicherung, Neustart, Rückfall bei Fehler). Lokal geänderte Dateien im Programmordner blockieren das Update
+   mit einer Warnung. Eine fehlgeschlagene Version wird nicht alle 5 Minuten neu versucht, sondern erst bei der nächsten neuen Version.
+
+Einrichten (einmalig, im LXC als root):
+
+```bash
+cd /opt/pve-disk-tool
+git pull            # holt update.sh, sync.sh und install-sync.sh
+./install-sync.sh   # richtet den 5-Minuten-Timer ein
+```
+
+Der erste Lauf stellt den Klon von deinem bisherigen Zweig auf `main` um. Das Protokoll siehst du mit
+`journalctl -u pve-disk-tool-sync -n 50`, den Timer mit `systemctl list-timers pve-disk-tool-sync.timer`.
+Ausschalten: `./install-sync.sh --entfernen`.
+
+**Folge:** Ein Push auf `claude/**` ist nach rund 5 Minuten im LXC produktiv. Der Dienst startet dabei kurz neu.
+
+Voraussetzung auf GitHub: Unter *Settings → Actions → General → Workflow permissions* muss „Read and write permissions“ gewählt sein,
+und `main` sollte als Standardzweig eingestellt sein.
+
+## 6. Sichern und aktualisieren
 
 - Der Ordner `data/` enthält Datenbank, Schlüssel und Hostliste. Der LXC sollte im normalen Proxmox-Backup sein.
-- **Aktualisieren:** `/opt/pve-disk-tool/update.sh` (im LXC als root). Das Skript holt die neue Version, lässt die Tests laufen, sichert die
+- **Von Hand aktualisieren:** `/opt/pve-disk-tool/update.sh` (im LXC als root). Mit dem automatischen Abgleich (Abschnitt 5) ist das nur noch nötig, wenn du nicht bis zum nächsten Lauf warten willst. Das Skript holt die neue Version, lässt die Tests laufen, sichert die
   Datenbank nach `data/vor-update-…` (die letzten 5 bleiben), startet den Dienst neu und prüft, ob er antwortet. Schlägt ein Schritt fehl, geht es
   automatisch auf die vorherige Version zurück. Es ändert nichts, wenn schon alles aktuell ist, und bricht bei lokalen Änderungen im Programmordner ab.
   Einstellungen, Passwort, Hostliste und Verlauf liegen in `data/` und bleiben unberührt.

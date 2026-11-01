@@ -12,6 +12,7 @@ bleibt der Kern unberührt: dort liegen nur ein eingeschränkter SSH-Zugang und 
 - **Verlauf:** Messwerte in SQLite, damit sichtbar wird, ob ein Fehlerwert noch steigt.
 - **Hosts aus der Oberfläche einrichten:** Assistent, der den eingeschränkten Zugang auf dem Host anlegt (einmalig mit dem root-Passwort, das nicht gespeichert wird). Kein Zugriff auf die Befehlszeile des Hosts nötig.
 - **Passwort in der Oberfläche** setzbar. Erreichbar nur aus dem lokalen Netz.
+- **Automatisch aktuell:** Push auf `claude/**` -> Tests und Secret-Scan -> Merge nach `main` -> der LXC holt `main` alle 5 Minuten (mit Tests, Sicherung und Rückfall).
 - Läuft ohne externe Abhängigkeiten (Node 22).
 
 Konzept und Begründung der Regeln: [KONZEPT.md](KONZEPT.md). Einrichtung: [docs/INSTALLATION.md](docs/INSTALLATION.md).
@@ -34,4 +35,6 @@ npm run demo        # Demo mit simulierten Hosts
 | `src/provision.js` | Einrichtung eines Hosts aus der Oberfläche (Fingerabdruck, Passwort einmalig, Prüfung) |
 | `web/` | Oberfläche (reines JavaScript, kein Build-Schritt) |
 | `host-setup/` | Prüfskript und Einrichtung für die Proxmox-Hosts |
+| `update.sh`, `sync.sh`, `install-sync.sh` | Aktualisierung im LXC: von Hand, alle 5 Minuten automatisch, Einrichtung des Timers |
+| `.github/workflows/` | Auto-Merge von `claude/**` nach `main` mit Tests und Secret-Scan |
 | `src/demo/` | Beispieldaten und simulierte Hosts für Tests und Demo |
