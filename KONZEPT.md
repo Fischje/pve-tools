@@ -45,7 +45,7 @@ Benutzers, überlebt Updates, im Notfall mit drei Befehlen rückbaubar):
 - Der feste Befehl ist ein kleines Prüfskript `/etc/diskmon/gate.sh` (gehört `root`, unter `/etc`,
   also von Updates unberührt). Es erlaubt nur eine Positivliste:
   `smartctl -j -a`, `smartctl -j -x`, `lsblk -J`, `zpool status -p` sowie
-  `smartctl -t short|long` und `smartctl -X`. Das Gerät muss in der aktuellen
+  `smartctl -t short|long`, `smartctl -t select,<von>-<bis>` (nur Zahlen, innerhalb der Plattengröße) und `smartctl -X`. Das Gerät muss in der aktuellen
   `lsblk`-Liste stehen und zu `/dev/sd[a-z]+` oder `/dev/nvme[0-9]+` passen. Alles andere wird abgelehnt.
 - `/etc/sudoers.d/diskmon`: erlaubt `diskmon` nur, genau dieses Prüfskript als `root` zu starten
   (keine Platzhalter auf `smartctl`). NVMe-Geräte sind `root`-only, daher sudo.
@@ -255,6 +255,8 @@ Export für Grafana.
   Schlüssel, weil Gerätenamen wie `/dev/sdc` sich beim Booten ändern.
 - `sample(disk_id, zeit, json_roh, temperatur, stunden, verschleiß, fehlerzähler …)`
 - `finding(disk_id, zeit, stufe, code, text)`
+- `testplan(host_id, art, intervall_monate, gesperrte_wochentage, fenster_von, fenster_bis, anlaufzeit, abstand)`
+- `testlauf(disk_id, art, start, ende, ergebnis, lba_von, lba_bis)`. Hält bei geteilten Langtests den Fortschritt fest
 
 Aufbewahrung: Stündliche Werte 90 Tage, danach tägliche Werte ohne Rohdaten.
 
