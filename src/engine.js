@@ -46,7 +46,10 @@ export class Engine {
     }
     if (prev && !prev.reachable) this.event(hostId, null, 'Host ist wieder erreichbar');
     let pools = prev?.pools ?? [];
-    try { pools = (await client.zpool()).map(ratePool); } catch { /* ohne ZFS */ }
+    try {
+      const list = await client.zpoolList().catch(() => ({}));
+      pools = (await client.zpool()).map((p) => ratePool({ ...p, ...(list[p.name] ?? {}) }, now));
+    } catch { /* ohne ZFS */ }
 
     let devices = [];
     try { devices = await client.listDisks(); } catch (e) { this.event(hostId, null, `Plattenliste fehlgeschlagen: ${e.message}`); }
@@ -89,11 +92,11 @@ export class Engine {
       if (result === 'interrupted') { this.event(hostId, disk.serial, `${label} ${name} wurde unterbrochen und wird wiederholt.`); continue; }
       this.event(hostId, disk.serial, `${label} ${name}: ${result === 'ok' ? 'ohne Fehler beendet' : `FEHLER – ${note}`}`);
       if (run.kind === 'short') this.db.setLastOk(disk.serial, 'short', now);
-      else if (run.kind === 'long' || result === 'failed') { this.db.setLastOk(disk.serial, 'long', now); this.db.clearProgress(disk.serial); }
+      else if (run.kind === 'long' || result === 'failed') { this.db.setLastOk(disk.serial, 'long', now); this.db.clearProgress(disk.serial); this.db.markCompletesLong(run.id); }
       else {
         const minutes = (now - run.started) / MIN;
         const adv = advanceProgress(this.db.getProgress(disk.serial), { from: run.lba_from, to: run.lba_to }, disk.totalLba, minutes);
-        if (adv.done) { this.db.setLastOk(disk.serial, 'long', now); this.db.clearProgress(disk.serial); this.event(hostId, disk.serial, `Langtest ${name} ist komplett abgeschlossen.`); }
+        if (adv.done) { this.db.setLastOk(disk.serial, 'long', now); this.db.clearProgress(disk.serial); this.db.markCompletesLong(run.id); this.event(hostId, disk.serial, `Langtest ${name} ist komplett abgeschlossen.`); }
         else this.db.setProgress(disk.serial, { ...adv.progress, started: this.db.getProgress(disk.serial)?.started ?? new Date(run.started) });
         if (adv.progress?.lbaPerMin) this.db.setLbaPerMin(disk.serial, adv.progress.lbaPerMin);
       }
@@ -156,7 +159,7 @@ export class Engine {
     await this.client(hostId).startTest(d.device, plan);
     const kind = plan.test;
     const hours = (JSON.parse(d.last_raw ?? '{}').hours) ?? null;
-    this.db.addRun({ serial, hostId, kind, started: now, from: plan.from, to: plan.to, hoursAtStart: hours, origin });
+    this.db.addRun({ serial, hostId, kind, started: now, from: plan.from, to: plan.to, hoursAtStart: hours, origin, plannedMinutes: plan.minutes ?? null });
     if (kind === 'select' && !this.db.getProgress(serial)) this.db.setProgress(serial, { nextLba: plan.from, totalLba: d.total_lba, lbaPerMin: null, segments: 0, started: now });
     const label = { short: 'Kurztest', long: 'Langtest', select: 'Langtest-Abschnitt' }[kind];
     this.event(hostId, serial, `${label} gestartet auf ${d.model} (${d.device})${origin === 'manual' ? ' – von Hand' : ''}${plan.minutes ? `, geplant ca. ${plan.minutes} min` : ''}`);

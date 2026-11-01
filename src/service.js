@@ -1,6 +1,8 @@
 // Bereitet die Daten für die Oberfläche auf (Bewertung, nächste Termine, Banner, Zusammenfassung).
 import { rate, LEVEL_LABEL, LEVEL_ORDER } from './rating.js';
 import { testWindow, nextPlanned, blockedIntervals, dayAllowed, dayKey, DEFAULT_SETTINGS } from './schedule.js';
+import { ratePool } from './zfs.js';
+import { summarize } from './stats.js';
 
 const iso = (d) => (d ? new Date(d).toISOString() : null);
 
@@ -37,6 +39,21 @@ export function cleanSettings(input) {
   return out;
 }
 
+
+/** Ordnet die Geräte eines Pools den bekannten Platten zu (über die Seriennummer im Namen oder den Gerätenamen). */
+export function annotatePool(pool, disks) {
+  const bySerial = disks.filter((d) => d.serial && String(d.serial).length >= 5);
+  const find = (name) => {
+    const n = String(name);
+    const hit = bySerial.find((d) => n.toLowerCase().includes(String(d.serial).toLowerCase()));
+    if (hit) return hit;
+    const base = n.replace(/^\/dev\//, '').replace(/-part\d+$/, '').replace(/^(sd[a-z]+)\d+$/, '$1').replace(/^(nvme\d+n\d+)p\d+$/, '$1');
+    return disks.find((d) => d.device === `/dev/${base}`) ?? null;
+  };
+  const tag = (dev) => { const d = find(dev.name); return d ? { ...dev, serial: d.serial, diskLabel: `${d.model} (${d.device})`, diskLevel: d.level } : dev; };
+  return { ...pool, vdevs: pool.vdevs.map((v) => ({ ...tag(v), devices: v.devices.map(tag) })) };
+}
+
 function bannerFor(host, s, st, hs, now) {
   if (s.mode !== 'manuell' || !hs?.reachable || !s.enabled) return null;
   if (!dayAllowed(now, s)) return null;
@@ -66,7 +83,7 @@ export function overview(engine) {
       const runs = db.runsOfDisk(row.serial, 6).map((r) => ({ kind: r.kind, started: iso(r.started), ended: iso(r.ended), result: r.result, note: r.note, origin: r.origin }));
       levels.push(rating.level);
       return {
-        serial: row.serial, device: row.device, model: row.model, kind: row.kind, capacityBytes: row.capacity_bytes, hours: raw?.hours ?? null, temperature: raw?.temperature ?? null,
+        serial: row.serial, hostId: host.id, device: row.device, model: row.model, kind: row.kind, capacityBytes: row.capacity_bytes, hours: raw?.hours ?? null, temperature: raw?.temperature ?? null,
         standby: !!row.standby, paused: !!row.paused, lastSeen: iso(row.last_seen), selective: !!row.selective,
         level: rating.level, levelLabel: LEVEL_LABEL[rating.level], score: rating.score, healthText: rating.healthText, wearUsed: rating.wearUsed, remainingLife: rating.remainingLife,
         findings: rating.findings, pollingShort: row.polling_short, pollingExtended: row.polling_extended,
@@ -76,13 +93,14 @@ export function overview(engine) {
         runs, attrs: raw?.attrs ? Object.values(raw.attrs) : [], nvme: raw?.nvme ?? null,
       };
     });
-    const pools = (hs?.pools ?? []);
+    const pools = (hs?.pools ?? []).map((p) => annotatePool(ratePool(p, now), disks));
     pools.forEach((p) => levels.push(p.level));
     const dec = engine.lastDecision.get(host.id);
     return {
       id: host.id, label: host.label ?? host.id, address: host.address ?? null, port: host.port ?? 22, kind: host.kind ?? 'fest', mode: s.mode, settings: s, reachable: !!hs?.reachable, error: hs?.error ?? null,
       lastPoll: iso(hs?.lastPoll), uptimeSec: st.uptimeSec, pools,
       window: { open: win.open, reason: win.reason, softEnd: iso(win.softEnd), minutesLeft: win.minutesLeft },
+      hostSummary: { reachable: !!hs?.reachable },
       decision: dec ? { action: dec.action, reason: dec.reason } : null,
       banner: bannerFor(host, s, st, hs, now),
       disks,
@@ -105,4 +123,47 @@ export function diskDetail(engine, serial, days = 365) {
   if (!row) return null;
   const hist = engine.db.history(serial, now.getTime() - days * 864e5);
   return { serial, history: hist.map((h) => ({ ts: iso(h.ts), hours: h.hours, temp: h.temp, wearUsed: h.wear_used, reallocated: h.reallocated, crc: h.crc, mediaErrors: h.media_errors, level: h.level })), runs: engine.db.runsOfDisk(serial, 50).map((r) => ({ kind: r.kind, started: iso(r.started), ended: iso(r.ended), result: r.result, note: r.note, origin: r.origin, from: r.lba_from, to: r.lba_to })) };
+}
+
+const toRun = (r) => ({ ...r, started: r.started, ended: r.ended });
+
+/** Statistik für die Startseite: gesamt und je Host. */
+export function statsOverview(engine) {
+  const now = engine.now();
+  const ov = overview(engine);
+  const runs = engine.db.allRuns(now.getTime() - 400 * 864e5).map(toRun);
+  const diskOf = (d) => ({ ...d, hostId: d.hostId });
+  const all = ov.hosts.flatMap((h) => h.disks.map(diskOf));
+  const global = summarize({ runs, disks: all, now, pools: ov.hosts.flatMap((h) => h.pools) });
+  const hosts = {};
+  for (const h of ov.hosts) {
+    hosts[h.id] = summarize({
+      runs: runs.filter((r) => r.hostId === h.id), disks: h.disks.map(diskOf), now,
+      tempDaily: engine.db.tempDaily(h.id, now.getTime() - 60 * 864e5), pools: h.pools,
+    });
+  }
+  return { generatedAt: now.toISOString(), global, hosts, hostLabels: Object.fromEntries(ov.hosts.map((h) => [h.id, h.label])) };
+}
+
+/** Laufende Tests und Verlauf aller Tests (optional nur ein Host). */
+export function testsList(engine, { limit = 300, hostId = null } = {}) {
+  const now = engine.now();
+  const label = Object.fromEntries(engine.hosts.map((h) => [h.id, h.label ?? h.id]));
+  const rows = engine.db.allRuns(now.getTime() - 800 * 864e5, 5000).filter((r) => label[r.hostId] && (!hostId || r.hostId === hostId));
+  const shape = (r) => ({
+    id: r.id, hostId: r.hostId, hostLabel: label[r.hostId], serial: r.serial, device: r.device, model: r.model, kind: r.kind,
+    started: iso(r.started), ended: iso(r.ended), result: r.result, note: r.note, origin: r.origin, plannedMinutes: r.plannedMinutes,
+    remainingPercent: r.result === 'running' ? r.remaining : null,
+  });
+  const running = rows.filter((r) => r.result === 'running').map(shape);
+  // Tests, die nicht von diesem Tool gestartet wurden (direkt am Host), aber auf der Platte laufen.
+  for (const host of engine.hosts) {
+    if (hostId && host.id !== hostId) continue;
+    for (const d of engine.db.disksOfHost(host.id)) {
+      if (d.selftest_running && !running.some((r) => r.serial === d.serial)) {
+        running.push({ id: null, hostId: host.id, hostLabel: label[host.id], serial: d.serial, device: d.device, model: d.model, kind: 'extern', started: null, ended: null, result: 'running', note: null, origin: 'extern', plannedMinutes: null, remainingPercent: d.selftest_remaining });
+      }
+    }
+  }
+  return { now: iso(now), running, runs: rows.slice(0, limit).map(shape) };
 }

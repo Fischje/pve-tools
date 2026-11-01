@@ -9,7 +9,7 @@ import { Engine } from './engine.js';
 import { Auth } from './auth.js';
 import { HostClient } from './hostapi.js';
 import { SshTransport } from './transport.js';
-import { overview, diskDetail, cleanSettings } from './service.js';
+import { overview, diskDetail, cleanSettings, statsOverview, testsList } from './service.js';
 import { isPrivateIp } from './net.js';
 import { Provisioner, writeHostsFile } from './provision.js';
 
@@ -79,6 +79,11 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       return send(res, 404, { error: 'Nicht gefunden' });
     }
     if (route === 'GET /api/overview') return send(res, 200, overview(engine));
+    if (route === 'GET /api/stats') return send(res, 200, statsOverview(engine));
+    if (route === 'GET /api/tests') {
+      const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit')) || 300));
+      return send(res, 200, testsList(engine, { limit, hostId: url.searchParams.get('host') || null }));
+    }
     let m;
     if ((m = /^\/api\/disks\/([^/]+)$/.exec(url.pathname)) && req.method === 'GET') {
       const d = diskDetail(engine, decodeURIComponent(m[1]));
@@ -174,6 +179,11 @@ async function main() {
   }
 
   const engine = new Engine({ db, hosts, makeClient, now, log });
+  if (demo) {
+    const { seedDemo } = await import('./demo/seed.js');
+    for (const h of hosts) await engine.pollHost(h.id);
+    seedDemo(db, hosts, now());
+  }
   const auth = new Auth(db);
   const hostsFile = path.join(dataDir, 'hosts.json');
   const provisioner = demo ? null : new Provisioner({ engine, dataDir, repoDir: ROOT, persist: (list) => writeHostsFile(hostsFile, list) });

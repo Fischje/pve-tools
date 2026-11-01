@@ -118,3 +118,75 @@ test('statische Dateien: Pfad-Tricks werden abgewehrt', async () => {
   assert.equal(r.status, 404);
   close();
 });
+
+// ---- Statistik, Testliste, Pools (mit erfundenem Verlauf) ----
+async function bootSeeded() {
+  const clock = () => new Date(2026, 10, 3, 9, 0);
+  const world = new DemoWorld(clock);
+  const db = openDb(null);
+  const engine = new Engine({ db, hosts: world.hosts, now: clock, makeClient: (h) => new HostClient(new DemoTransport(world, h.id)) });
+  for (const h of world.hosts) await engine.pollHost(h.id);
+  const { seedDemo } = await import('../src/demo/seed.js');
+  seedDemo(db, world.hosts, clock());
+  const app = createApp({ db, engine, auth: new Auth(db), allowPublic: true });
+  await new Promise((r) => app.listen(0, '127.0.0.1', r));
+  const get = (p) => fetch(`http://127.0.0.1:${app.address().port}${p}`).then((r) => r.json());
+  return { get, close: () => app.close(), db, engine };
+}
+
+test('Statistik: Summen, zwölf Monate, Host-Aufteilung', async () => {
+  const { get, close } = await bootSeeded();
+  const s = await get('/api/stats');
+  assert.deepEqual(Object.keys(s.hosts).sort(), ['pbs', 'pve', 'router']);
+  assert.ok(s.global.totals.runs > 100);
+  assert.equal(s.global.byMonth.length, 12);
+  const sum = Object.values(s.hosts).reduce((a, h) => a + h.totals.runs, 0);
+  assert.equal(sum, s.global.totals.runs, 'Host-Statistiken ergeben zusammen die Gesamtstatistik');
+  assert.equal(s.hosts.pve.disks.count, 11);
+  assert.equal(s.hosts.pve.pools.length, 3);
+  assert.ok(s.hosts.pve.tempDaily.length >= 30);
+  assert.ok(s.global.totals.longCompleted > 10);
+  assert.ok(s.global.totals.failed >= 1, 'der Fehlschlag der Seagate ist im Verlauf');
+  close();
+});
+
+test('erfundener Verlauf hält sich an die Zeitplanregeln: nie montags, nie 19–01 Uhr', async () => {
+  const { get, close } = await bootSeeded();
+  const s = await get('/api/stats');
+  const hm = s.global.heatmap;
+  assert.equal(hm[1].reduce((a, b) => a + b, 0), 0, 'Montag (Index 1) ist leer');
+  for (const h of [19, 20, 21, 22, 23, 0]) assert.equal(hm.reduce((a, row) => a + row[h], 0), 0, `Stunde ${h}`);
+  close();
+});
+
+test('Testliste: laufende Tests, Filter nach Host', async () => {
+  const { get, close, engine } = await bootSeeded();
+  const nv = engine.db.disksOfHost('router')[0];
+  await engine.startNow('router', nv.serial, { test: 'long', minutes: 30 }, 'manual');
+  const all = await get('/api/tests?limit=50');
+  assert.equal(all.running.length, 1);
+  assert.equal(all.running[0].hostId, 'router');
+  assert.equal(all.running[0].plannedMinutes, 30);
+  assert.equal(all.runs.length, 50);
+  const pve = await get('/api/tests?host=pve&limit=1000');
+  assert.ok(pve.runs.every((r) => r.hostId === 'pve'));
+  assert.equal(pve.running.length, 0);
+  close();
+});
+
+test('Pools: vdev-Baum, Zuordnung zu Platten, Füllstand, Bewertung', async () => {
+  const { get, close } = await bootSeeded();
+  const o = await get('/api/overview');
+  const pve = o.hosts.find((h) => h.id === 'pve');
+  const tank = pve.pools.find((p) => p.name === 'tank');
+  assert.equal(tank.vdevs[0].type, 'raidz2');
+  assert.equal(tank.cap, 48);
+  const bad = tank.vdevs[0].devices.find((d) => d.cksum === 3);
+  assert.equal(bad.serial, 'ZHZ0RHKE', 'Gerät im vdev ist der richtigen Platte zugeordnet');
+  assert.equal(bad.diskLevel, 'replace');
+  assert.equal(tank.level, 'watch');
+  assert.ok(tank.findings.some((f) => f.code === 'vdev-errors'));
+  const rpool = pve.pools.find((p) => p.name === 'rpool');
+  assert.ok(rpool.vdevs[0].devices.every((d) => d.serial), 'beide Samsung zugeordnet');
+  close();
+});

@@ -10,6 +10,7 @@
 #   list                         Platten auflisten (lsblk, JSON)
 #   uptime                       Sekunden seit dem Hochfahren
 #   zpool                        zpool status (falls ZFS vorhanden)
+#   zpoollist                    zpool list: Größe, belegt, frei, Fragmentierung (falls ZFS vorhanden)
 #   smart <dev> [standby]        smartctl -j -a; mit "standby" wird eine schlafende Platte nicht geweckt
 #   test <dev> short|long|abort  Selbsttest starten bzw. abbrechen
 #   select <dev> <von> <bis>     Selektiver Selbsttest über einen Sektorbereich (nur Zahlen)
@@ -41,6 +42,9 @@ case "${a[0]}" in
   zpool)
     [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
     if command -v zpool >/dev/null 2>&1; then exec zpool status -p; fi ;;
+  zpoollist)
+    [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
+    if command -v zpool >/dev/null 2>&1; then exec zpool list -H -p -o name,size,alloc,free,frag,cap,health; fi ;;
   smart)
     [[ ${#a[@]} -ge 2 && ${#a[@]} -le 3 ]] || fail "Argumente: smart <dev> [standby]"
     dev_ok "${a[1]}"

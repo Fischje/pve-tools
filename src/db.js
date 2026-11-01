@@ -28,6 +28,10 @@ export function openDb(dir) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
   db.exec(SCHEMA);
+  // Migrationen für bestehende Datenbanken (Spalten, die in späteren Versionen dazukamen).
+  const cols = db.prepare('PRAGMA table_info(testrun)').all().map((c) => c.name);
+  if (!cols.includes('planned_minutes')) db.exec('ALTER TABLE testrun ADD COLUMN planned_minutes INTEGER');
+  if (!cols.includes('completes_long')) db.exec('ALTER TABLE testrun ADD COLUMN completes_long INTEGER DEFAULT 0');
   const q = (sql) => db.prepare(sql);
   const d = (ms) => (ms == null ? null : new Date(ms));
   const ms = (date) => (date == null ? null : date.getTime());
@@ -78,8 +82,16 @@ export function openDb(dir) {
     history: (serial, sinceMs) => q('SELECT ts,hours,temp,wear_used,reallocated,crc,media_errors,level FROM sample WHERE serial=? AND ts>=? ORDER BY ts').all(serial, sinceMs),
     prune(now) { q('DELETE FROM sample WHERE ts<?').run(ms(now) - 800 * 864e5); q('DELETE FROM event WHERE ts<?').run(ms(now) - 365 * 864e5); },
 
-    addRun: (r) => Number(q('INSERT INTO testrun(serial,host_id,kind,started,lba_from,lba_to,hours_at_start,origin) VALUES(?,?,?,?,?,?,?,?)')
-      .run(r.serial, r.hostId, r.kind, ms(r.started), r.from ?? null, r.to ?? null, r.hoursAtStart ?? null, r.origin ?? 'plan').lastInsertRowid),
+    addRun: (r) => Number(q('INSERT INTO testrun(serial,host_id,kind,started,ended,lba_from,lba_to,hours_at_start,origin,planned_minutes,result,note,completes_long) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
+      .run(r.serial, r.hostId, r.kind, ms(r.started), ms(r.ended), r.from ?? null, r.to ?? null, r.hoursAtStart ?? null, r.origin ?? 'plan', r.plannedMinutes ?? null, r.result ?? 'running', r.note ?? null, r.completesLong ? 1 : 0).lastInsertRowid),
+    markCompletesLong: (id) => q('UPDATE testrun SET completes_long=1 WHERE id=?').run(id),
+    /** Alle Testläufe seit einem Zeitpunkt, mit Angaben zur Platte (für Statistik und Testliste). */
+    allRuns: (sinceMs, limit = 5000) => q(`SELECT r.id, r.serial, r.host_id AS hostId, r.kind, r.started, r.ended, r.result, r.note, r.origin, r.planned_minutes AS plannedMinutes, r.completes_long AS completesLong,
+        d.model, d.device, d.kind AS diskKind, d.selftest_remaining AS remaining
+        FROM testrun r LEFT JOIN disk d ON d.serial = r.serial WHERE r.started >= ? ORDER BY r.started DESC LIMIT ?`).all(sinceMs, limit),
+    /** Tagesmittel der Temperatur je Host (Mittel, Minimum, Maximum über alle Platten und Messungen des Tages). */
+    tempDaily: (hostId, sinceMs) => q(`SELECT date(s.ts/1000,'unixepoch','localtime') AS day, ROUND(AVG(s.temp),1) AS avg, MIN(s.temp) AS min, MAX(s.temp) AS max
+        FROM sample s JOIN disk d ON d.serial = s.serial WHERE d.host_id = ? AND s.ts >= ? AND s.temp IS NOT NULL GROUP BY day ORDER BY day`).all(hostId, sinceMs),
     runningRuns: (hostId) => q("SELECT * FROM testrun WHERE host_id=? AND result='running'").all(hostId),
     finishRun: (id, result, ended, note) => q('UPDATE testrun SET result=?, ended=?, note=? WHERE id=?').run(result, ms(ended), note ?? null, id),
     runsOfDisk: (serial, limit = 20) => q('SELECT * FROM testrun WHERE serial=? ORDER BY started DESC LIMIT ?').all(serial, limit),

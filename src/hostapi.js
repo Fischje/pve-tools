@@ -1,6 +1,6 @@
 // Spricht über einen Transport mit dem Gate-Skript des Hosts und liefert normalisierte Daten.
 import { normalize } from './smart.js';
-import { parseZpoolStatus } from './zfs.js';
+import { parseZpoolStatus, parseZpoolList } from './zfs.js';
 
 export class HostClient {
   constructor(transport) { this.t = transport; }
@@ -31,6 +31,12 @@ export class HostClient {
   async zpool() {
     const r = await this.t.run('zpool', 30000);
     return r.code === 0 ? parseZpoolStatus(r.stdout) : [];
+  }
+
+  /** Größe/Füllstand der Pools. Ältere Hosts kennen den Befehl nicht: dann leer (Hosts über „Neu einrichten“ aktualisieren). */
+  async zpoolList() {
+    const r = await this.t.run('zpoollist', 30000);
+    return r.code === 0 ? parseZpoolList(r.stdout) : {};
   }
 
   /** Test starten. plan: {test:'short'|'long'} oder {test:'select', from, to}. */

@@ -20,9 +20,13 @@ test('Abfrage speichert Hosts, Platten und Messwerte', async () => {
   const { engine, db } = setup();
   await engine.pollHost('pve');
   const disks = db.disksOfHost('pve');
-  assert.equal(disks.length, 8);
+  assert.equal(disks.length, 11);
   assert.ok(db.getHostState('pve').reachable);
-  assert.equal(db.getHostState('pve').pools[0].name, 'tank');
+  const tank = db.getHostState('pve').pools.find((p) => p.name === 'tank');
+  assert.equal(tank.vdevs[0].type, 'raidz2');
+  assert.equal(tank.vdevs[0].devices.length, 6);
+  assert.equal(tank.cap, 48, 'Füllstand kommt aus zpool list');
+  assert.equal(tank.level, 'watch', 'Prüfsummenfehler an einem Gerät');
   assert.equal(db.getDisk('ZL2M2KFZ').polling_extended, 1079);
 });
 
