@@ -63,6 +63,19 @@ Test vom LXC aus (sollte eine JSON-Plattenliste liefern):
 ssh -i /opt/pve-disk-tool/data/ssh/id_ed25519 diskmon@192.168.1.11 list
 ```
 
+Fragt `ssh` nach einem Passwort, fehlt meist `-i <Schlüssel>` im Aufruf. Ohne `-i` probiert `ssh` nur die Standardschlüssel von root, und
+der Benutzer `diskmon` hat bewusst kein Passwort. Das Tool selbst nutzt immer den Schlüssel aus `data/ssh/`.
+
+**Fehlersuche, wenn es mit `-i` trotzdem scheitert:**
+
+| Symptom | Ursache und Abhilfe |
+|---------|---------------------|
+| Fragt nach Passwort / `Permission denied (publickey)` | Auf dem Host `cat /var/lib/diskmon/.ssh/authorized_keys` ansehen. Steht bei `from="…"` die falsche IP (nicht die des LXC), `setup-host.sh` mit der richtigen IP erneut ausführen. Der Schlüssel muss vollständig und unverändert aus der `.pub`-Datei stammen. |
+| `gate: unbekannter Befehl` oder `unerlaubte Zeichen` | Der Befehl steht nicht auf der Positivliste. Erlaubt sind nur `list`, `uptime`, `zpool`, `smart`, `test`, `select`. |
+| `sudo: a password is required` | Die sudoers-Datei fehlt: `ls -l /etc/sudoers.d/diskmon` und `visudo -cf /etc/sudoers.d/diskmon` prüfen. |
+| Zeitüberschreitung | Firewall oder falsche Adresse in `hosts.json`. |
+| Genauer Grund | Auf dem Host `journalctl -u ssh -n 30`. Im LXC `ssh -v -i … diskmon@<host> list`. |
+
 ## 5. Starten
 
 Mit systemd (empfohlen im LXC):
