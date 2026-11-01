@@ -393,6 +393,8 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
 - Langtest-Dauer ist für die 12-TB-Exos bekannt (1079 min). Für die 6-TB-Platten am PBS liest das Tool den Wert selbst aus.
-- Unterstützen die HDDs selektive Selbsttests? (Die SATA-SSD im `router` tut es nicht, das ist dort aber unkritisch.) Ausgabe von `smartctl -c /dev/sda` auf `pve` und `pbs`, Zeile
-  „Selective Self-test supported“. Ohne das lässt sich ein Langtest nicht über mehrere Tage aufteilen.
+- Selektive Selbsttests: **Auf `pve` bestätigt** (Exos ST12000NM003G, `smartctl 7.5`: „Selective Self-test supported“,
+  Kurztest 1 Minute, Langtest 1079 Minuten). Fehlt noch für die 6-TB-HDDs auf `pbs`. Ausgabe von `smartctl -c /dev/sda` dort, Zeile
+  „Selective Self-test supported“. Ohne das lässt sich ein Langtest dort nicht über mehrere Sitzungen aufteilen. Die zwei
+  anderen Exos-Typen (ST12000NM0248) werden vom Tool beim ersten Lauf selbst geprüft.
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
