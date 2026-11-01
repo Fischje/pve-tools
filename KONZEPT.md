@@ -63,33 +63,67 @@ bindet an Gerätenamen wie `/dev/sdc`).
 
 Der Zeitplan läuft im Tool (im LXC), nicht als Cronjob auf dem Host. Der Host bleibt unverändert.
 Die Platte führt den Test selbst aus. Das Tool stößt ihn nur an und liest später das Ergebnis.
-Fällt der LXC zwischendurch aus, läuft ein begonnener Test trotzdem zu Ende.
+**Alles Folgende ist in der Oberfläche unter „Einstellungen → Zeitplan“ einstellbar**, pro Host
+(PVE und PBS können verschieden sein).
 
-Voreinstellung (pro Host und pro Plattentyp änderbar):
+| Einstellung | Standard | Bedeutung |
+|-------------|----------|-----------|
+| Kurztest-Intervall | alle 1 Monat | Anzahl Monate (1–12) |
+| Langtest-Intervall | alle 3 Monate | Anzahl Monate (1–12), empfohlen 3–4 |
+| Gesperrte Wochentage | Montag | Mehrfachauswahl. Gilt für Kurz- **und** Langtests. Fällt ein Termin darauf, rutscht er auf den nächsten erlaubten Tag |
+| Betriebsfenster des Hosts | 07:00 – 22:00 | Wann der Server läuft. Tests dürfen nur in diesem Fenster laufen |
+| Anlaufzeit nach dem Hochfahren | 20 Minuten | Wartezeit, bis nach dem Boot getestet wird (ZFS-Import, Dienste, Backups) |
+| Sicherheitsabstand vor Ende | 30 Minuten | So lange vor dem Herunterfahren wird kein Test mehr gestartet und ein laufender sauber beendet |
+| Reihenfolge | seriell | Immer nur **eine** Platte pro Host gleichzeitig, nacheinander |
+| Kurz- und Langtest am selben Tag | verboten | Ein Langtest ersetzt in seinem Monat den Kurztest |
 
-| Test | Standard | Hinweis |
-|------|----------|---------|
-| Kurztest | wöchentlich, Sonntag 03:00 | Minuten, kaum Last. Alle Platten eines Hosts nacheinander |
-| Langtest | monatlich, rollierend | **Eine Platte nach der anderen** pro Host, nicht alle zugleich |
+#### Ablauf
 
-Regeln, damit der Zeitplan nichts kaputt macht:
+- **Seriell:** Pro Host läuft immer nur ein Test. Die nächste Platte folgt erst, wenn die vorige fertig ist.
+  Die Reihenfolge ist fest (z. B. nach Seriennummer), damit sie nachvollziehbar bleibt.
+  Verschiedene Hosts dürfen parallel laufen.
+- **Kurztest** (wenige Minuten je Platte) passt in jedes Fenster. Alle Platten sind an einem Tag durch.
+- **Terminlogik:** Das Intervall rechnet ab dem letzten **erfolgreich abgeschlossenen** Test. Ist er fällig, wird
+  er am nächsten erlaubten Tag im Betriebsfenster gestartet, nicht an einem gesperrten Wochentag.
+- **Rücksicht auf Last:** Läuft gerade ein ZFS-Scrub oder Resilver, wird verschoben. Ebenso, wenn
+  schon ein Test auf der Platte läuft oder eine einstellbare Sperrzeit gilt (z. B. Backup-Fenster auf dem PBS).
 
-- **Rollierender Langtest:** Große HDDs (z. B. 12 TB) brauchen für einen Langtest viele Stunden.
-  Das Tool startet pro Host immer nur einen Langtest. Die nächste Platte folgt erst, wenn der
-  vorherige Test fertig ist. Die Reihenfolge wird so verteilt, dass jede Platte innerhalb des Monats
-  einmal drankommt. Verschiedene Hosts (PVE und PBS) dürfen parallel laufen.
-- **Rücksicht auf Last:** Ein Test wird verschoben, wenn auf dem Host gerade ein ZFS-Scrub oder
-  Resilver läuft oder schon ein Selbsttest auf der Platte läuft. Er holt den Termin im nächsten Zeitfenster nach.
-  Sperrzeiten (z. B. Backup-Fenster auf dem PBS) lassen sich einstellen.
-- **Nachholen:** War der Host zum Termin nicht erreichbar, wird der Test beim nächsten
-  erfolgreichen Abruf nachgeholt, aber nur innerhalb des erlaubten Zeitfensters.
-- **Schlafende HDDs:** Ein geplanter Test weckt die Platte bewusst auf. Das ist gewollt und
-  wird in der Oberfläche vermerkt.
-- **Ergebnis zählt in die Bewertung:** Ein fehlgeschlagener Test (z. B. „read failure“) lässt die Stufe
-  auf mindestens „Bald tauschen“ steigen. Ein zu lange zurückliegender erfolgreicher Test wird als Hinweis
-  angezeigt („letzter Langtest vor 94 Tagen“).
-- **Anzeige:** In der Tests-Ansicht steht pro Platte der nächste geplante Termin. Der Zeitplan kann
-  pro Platte oder Host pausiert werden. „Jetzt starten“ per Knopf bleibt zusätzlich möglich.
+#### Server geht nachts aus
+
+Fährt der Server herunter, wird ein laufender Selbsttest abgebrochen (im Testprotokoll steht dann
+„Interrupted (host reset)“ und er zählt nicht). Deshalb gilt:
+
+1. **Nie außerhalb des Fensters starten.** Das Tool kennt das Betriebsfenster und startet nur darin.
+   Ist der Host nicht erreichbar, passiert nichts; der Termin wird nachgeholt (siehe „Terminlogik“).
+2. **Rechtzeitig aufhören.** Vor Fensterende minus Sicherheitsabstand wird kein neuer Test gestartet. Läuft einer
+   noch, wird er per `smartctl -X` sauber abgebrochen und als „unterbrochen, wird fortgesetzt“ vermerkt (kein Fehlalarm).
+3. **Langtest passt nicht in ein Fenster.** Ein Langtest einer 12-TB-HDD dauert viele Stunden (nach den Angaben der
+   Platte oft über 15 Stunden); das Fenster ist kürzer, und das gilt noch mehr, wenn mehrere Platten nacheinander dran sind.
+   Lösung: Der Langtest wird **auf mehrere Tage aufgeteilt**. ATA-Platten können dafür *selektive Selbsttests*
+   (`smartctl -t select,<von>-<bis>`). Das Tool teilt die Plattenfläche in Abschnitte, die jeweils ins Restfenster
+   passen. Es merkt sich in der Datenbank den Fortschritt (bis zu welchem Sektor gelesen wurde) und macht am
+   nächsten erlaubten Tag dort weiter, bis die ganze Platte einmal gelesen ist. Erst dann gilt der Langtest als
+   bestanden. Die Dauer pro Abschnitt kommt aus den Angaben der Platte (empfohlene Testzeit) und wird beim ersten Lauf
+   nachgemessen.
+   - Das gleiche Prinzip gilt für die nächste Platte: Der Rest des Tages wird nicht verschwendet, sondern geht an sie.
+   - NVMe und SATA-SSDs sind schnell genug, hier genügt ein normaler Langtest im Fenster.
+   - Unterstützt eine Platte keine selektiven Tests, meldet das Tool das und bietet an, den Test an einem
+     Tag mit längerem Betriebsfenster zu starten (Fenster einmalig verlängern; dazu muss der Server aber wirklich an bleiben).
+4. **Nach dem Hochfahren warten.** Nach der Anlaufzeit wird getestet, vorher nicht. Der Host muss zuerst
+   mindestens so lange ohne Unterbrechung erreichbar gewesen sein.
+5. **Auch das Tool selbst kann schlafen.** Läuft der LXC auf demselben Server, ist er nachts ebenfalls aus. Das ist
+   unkritisch: Der Zeitplan wird beim Start neu berechnet, und ein begonnener Test läuft in der Platte weiter.
+   Läuft der LXC auf einem Gerät, das durchläuft, während der Ziel-Host schläft, wird nur auf Erreichbarkeit
+   des Hosts reagiert.
+
+#### Ergebnis und Anzeige
+
+- Ein fehlgeschlagener Test (z. B. „read failure“) lässt die Stufe auf mindestens „Bald tauschen“ steigen.
+  Ein unterbrochener Test (Fensterende, Neustart) ist **kein** Fehler.
+- Ist der letzte erfolgreiche Test sehr lange her, steht ein Hinweis da („letzter Langtest vor 140 Tagen“).
+- In der Tests-Ansicht steht pro Platte: nächster Termin, bei einem geteilten Langtest „Abschnitt 3 von 7, 43 % gelesen“,
+  sowie Knöpfe zum Pausieren und „Jetzt starten“ (auch dieser nur im Betriebsfenster, mit Rückfrage).
+- Geplante Tests wecken schlafende HDDs bewusst auf; das wird vermerkt.
 
 ### Docker im LXC
 
@@ -255,6 +289,10 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
   (Dann kann `smartctl -d …` nötig sein.)
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
-- Selbsttests starten ist gesetzt (per Knopf wie `disk_test.sh` und nach Zeitplan). Zu klären: Gibt es
-  Zeiten, in denen nicht getestet werden darf (z. B. Backup-Fenster auf dem PBS)?
+- Wann genau läuft der PVE-Host (Hochfahren/Herunterfahren) und wann der PBS? Laufen beide im gleichen Rhythmus?
+  Das sind die Voreinstellungen fürs Betriebsfenster.
+- Gibt es Sperrzeiten innerhalb des Fensters (z. B. Backup-Fenster auf dem PBS)?
+- Wie lange dauert ein Langtest deiner Platten laut `smartctl -c` (Zeile „Extended self-test routine recommended
+  polling time“)? Daraus ergibt sich, in wie viele Tage er geteilt wird.
+- Wird der Server automatisch heruntergefahren (Zeitplan im BIOS/Skript) oder von Hand?
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
