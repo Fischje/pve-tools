@@ -203,12 +203,9 @@ Folgen für das Konzept:
   Das ist wichtig, weil die Platten eines ZFS-Pools zusammengehören: Würden mehrere Platten desselben Pools
   gleichzeitig getestet, wäre der Pool langsamer und nicht mehr redundant belastbar.
 - **Automatischer Start auf dem PBS** ist gewünscht und wird zum Standard (mit Banner und „Heute nicht“).
-- **Anzeige „Wearout“ in Proxmox:** Beim NVMe bedeutet die Zahl vermutlich „verbraucht“ (z. B. 4 % bei den WD Red,
-  1–2 % bei den Lexar, 9 % bei den Samsung, alle sehr gesund). Bei der SATA-SSD im `router` steht 86 %. Bei SATA-Platten
-  zeigt Proxmox meist den normalisierten Wert, bei dem **100 neu und kleiner schlechter** bedeutet. Das wären dann 86 %
-  Restlebensdauer, also unauffällig. Die Zahlen sind also nicht einheitlich gemeint. Genau das soll das Tool klarstellen
-  („Verschleiß 14 %, Restlebensdauer 86 %“). Ob die 86 % wirklich „Rest“ heißen, bestätigt `smartctl -a /dev/sda`
-  auf dem `router`.
+- **Anzeige „Wearout“ in Proxmox:** Die Zahl bedeutet durchgehend **verbraucht**, auch bei SATA-SSDs (Proxmox rechnet
+  dort 100 minus normalisierten Wert). Die SATA-SSD im `router` (WD, `/dev/sda`) zeigt `Media_Wearout_Indicator = 14`,
+  also **86 % verbraucht, 14 % Rest**. Das ist **kein** Rest von 86 %. Siehe „Befund SATA-SSD im router“ unten.
 - **Auffälliges auf dem PBS:** Die WD60EZAZ ist nach meinem Wissen eine SMR-Platte (Shingled Magnetic Recording).
   SMR und ZFS vertragen sich schlecht, besonders bei Resilver und beim Schreiben vieler kleiner Blöcke. Das könnte
   zum hohen IO-Delay beitragen, den du im August auf dem PBS hattest. Das Tool kann künftig ein „Bekannte SMR-Modelle“-Hinweis
@@ -282,6 +279,39 @@ meist an Kabel, Stecker oder Backplane. Die Platte selbst ist dabei oft in Ordnu
   Hersteller): ≤ 10 % Kritisch, ≤ 20 % Bald tauschen, ≤ 40 % Beobachten.
 - Sektor-/Fehlerattribute wie bei HDD. Temperatur ≥ 70 °C: Beobachten.
 
+### Befund SATA-SSD im `router` (Beispiel für die Bewertung)
+
+Aus `smartctl -a /dev/sda` (WD Blue, 500 GB, 44603 Betriebsstunden ≈ 5,1 Jahre):
+
+| Wert | Messung | Einordnung |
+|------|---------|------------|
+| Media_Wearout_Indicator (230) | 14 (normalisiert, schlechtester Wert auch 14) | Verbrauch 86 %. **Bald tauschen** |
+| Reallocated, Grown_Bad_Blocks, Program-/Erase-Fail, Reported_Uncorrect | alle 0 | keine Defekte |
+| Available_Reserved_Space (232) | 100 (Schwelle 4) | Reserve unangetastet |
+| Fehlerprotokoll | „No Errors Logged“ | sauber |
+| Unexpected_Power_Loss (174) | 99 bei 198 Einschaltvorgängen | viele unsaubere Abschaltungen (Stromausfall/Hard-Reset?). Hinweis |
+| Temperatur | 43 °C, Maximum je 58 °C | unauffällig |
+| Letzte Selbsttests | Kurztest bei 33759 h, Langtest bei 32646 h | ca. 10800 Stunden (≈ 15 Monate) her. Hinweis „lange kein Test“ |
+| Host-Schreibmenge (241) | 44780 GiB ≈ 48 TB | |
+| NAND-Schreibmenge (233 + 234) | 63912 + 84790 GB ≈ 149 TB | Schreibverstärkung ca. Faktor 3 |
+
+Einordnung: **Die Platte selbst sagt, dass sie zu 86 % verbraucht ist, aber sie ist noch fehlerfrei.** Die Herstellerangabe
+und die geschriebene Datenmenge passen nicht ganz zusammen: Bei 48 TB Host-Schreibmenge wäre ich bei einer 500-GB-Consumer-SSD
+eher bei einem Viertel der üblichen Schreibleistung (laut Datenblatt meist um 200 TBW, bitte prüfen), die Kennzahl der Platte
+rechnet aber mit den echten NAND-Zyklen inklusive SLC-Cache. **Maßgeblich ist der Wert der Platte.** Empfehlung im Tool:
+„Ersatz einplanen, in den nächsten Wochen bis Monaten, kein Notfall“. Dazu der Hinweis: Diese SSD ist Teil des Systems
+(Partitionen BIOS boot, EFI, ZFS) und vermutlich im ZFS-Spiegel mit den beiden NVMe. Ob der Spiegel gesund ist, sagt
+`zpool status`. Das Tool zeigt das neben der Platte an.
+
+Folgen für die Umsetzung:
+- Bei WD/SanDisk-SSDs enthält die Rohspalte von Attribut 230 ein gepacktes Feld (`0x0e1a0c280e1a`). Das Tool bewertet hier den
+  **normalisierten Wert**, nicht den Rohwert.
+- Herstellerspezifische Attributnamen kommen aus der `smartctl`-Laufwerksdatenbank, die Bewertung nutzt eine Liste
+  bekannter Verschleiß-Attribute je Hersteller.
+- SATA-SSDs unterstützen oft keine selektiven Selbsttests („Selective Self-tests/Logging not supported“), brauchen sie aber auch nicht,
+  denn ein Langtest einer 500-GB-SSD dauert Minuten bis wenige Stunden.
+- Diese SSD ist ein Testfall für die Bewertung (siehe „Geplante Repo-Struktur“).
+
 ### NVMe
 
 | Befund | Stufe |
@@ -345,7 +375,7 @@ pve-disk-tool/
 └─ docs/           # LXC-Einrichtung Schritt für Schritt
 ```
 
-Die Bewertungsregeln werden mit Testdateien abgesichert, darunter deine Seagate mit 16
+Die Bewertungsregeln werden mit Testdateien abgesichert, darunter die WD-SATA-SSD aus dem `router` (86 % verbraucht, sonst sauber) und deine Seagate mit 16
 umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ plus Kabelhinweis).
 
 ## Vorgehen
@@ -363,6 +393,6 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
 - Langtest-Dauer ist für die 12-TB-Exos bekannt (1079 min). Für die 6-TB-Platten am PBS liest das Tool den Wert selbst aus.
-- Unterstützen die Platten selektive Selbsttests? Ausgabe von `smartctl -c /dev/sda` auf `pve` und `pbs`, Zeile
+- Unterstützen die HDDs selektive Selbsttests? (Die SATA-SSD im `router` tut es nicht, das ist dort aber unkritisch.) Ausgabe von `smartctl -c /dev/sda` auf `pve` und `pbs`, Zeile
   „Selective Self-test supported“. Ohne das lässt sich ein Langtest nicht über mehrere Tage aufteilen.
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
