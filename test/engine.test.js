@@ -1,0 +1,123 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { openDb } from '../src/db.js';
+import { Engine, defaultsForHost } from '../src/engine.js';
+import { DemoWorld, DemoTransport } from '../src/demo/world.js';
+import { HostClient } from '../src/hostapi.js';
+
+// Virtuelle Uhr: 2026-11-03 ist ein Dienstag.
+function setup(start = new Date(2026, 10, 3, 9, 0)) {
+  let t = start.getTime();
+  const clock = () => new Date(t);
+  const world = new DemoWorld(clock, { testMinutes: 10 });
+  const db = openDb(null);
+  const hosts = world.hosts;
+  const engine = new Engine({ db, hosts, now: clock, makeClient: (h) => new HostClient(new DemoTransport(world, h.id)) });
+  return { world, db, engine, advance: (min) => { t += min * 60000; }, clock };
+}
+
+test('Abfrage speichert Hosts, Platten und Messwerte', async () => {
+  const { engine, db } = setup();
+  await engine.pollHost('pve');
+  const disks = db.disksOfHost('pve');
+  assert.equal(disks.length, 8);
+  assert.ok(db.getHostState('pve').reachable);
+  assert.equal(db.getHostState('pve').pools[0].name, 'tank');
+  assert.equal(db.getDisk('ZL2M2KFZ').polling_extended, 1079);
+});
+
+test('Host nicht erreichbar wird gemeldet und erholt sich', async () => {
+  const { engine, db, world } = setup();
+  world.setUp('pbs', false);
+  await engine.pollHost('pbs');
+  assert.equal(db.getHostState('pbs').reachable, false);
+  world.setUp('pbs', true);
+  await engine.pollHost('pbs');
+  assert.equal(db.getHostState('pbs').reachable, true);
+  assert.ok(db.events().some((e) => /wieder erreichbar/.test(e.text)));
+});
+
+test('Zeitplan startet einen Kurztest nach dem anderen und verbucht das Ergebnis', async () => {
+  const { engine, db, advance } = setup();
+  // Langtests sind schon erledigt, damit nur Kurztests fällig sind.
+  await engine.pollHost('router');
+  for (const d of db.disksOfHost('router')) db.setLastOk(d.serial, 'long', new Date(2026, 10, 1));
+  await engine.tickHost('router');
+  const running = db.runningRuns('router');
+  assert.equal(running.length, 1, 'genau ein Test gleichzeitig (seriell)');
+  assert.equal(running[0].kind, 'short');
+  // weitere Ticks starten keine zweite Platte
+  advance(1); await engine.tickHost('router');
+  assert.equal(db.runningRuns('router').length, 1);
+  // Test ist zu Ende, nach der Abfrage ist er verbucht und die nächste Platte startet
+  advance(12); await engine.tickHost('router');
+  const done = db.runsOfDisk(running[0].serial)[0];
+  assert.equal(done.result, 'ok');
+  assert.ok(db.getDisk(running[0].serial).last_short_ok);
+  advance(1); await engine.tickHost('router');
+  assert.equal(db.runningRuns('router').length, 1);
+  assert.notEqual(db.runningRuns('router')[0].serial, running[0].serial);
+});
+
+test('Langtest auf dem pve wird in Abschnitte geteilt und am nächsten Tag fortgesetzt', async () => {
+  const { engine, db, advance } = setup(new Date(2026, 10, 3, 9, 0));
+  await engine.pollHost('pve');
+  for (const d of db.disksOfHost('pve')) { db.setLastOk(d.serial, 'short', new Date(2026, 10, 1)); if (d.serial !== 'ZL2M2KFZ') db.setLastOk(d.serial, 'long', new Date(2026, 10, 1)); }
+  await engine.tickHost('pve');
+  const first = db.runningRuns('pve')[0];
+  assert.equal(first.kind, 'select');
+  assert.equal(first.lba_from, 0);
+  assert.equal(db.getProgress('ZL2M2KFZ').nextLba, 0);
+  advance(15); await engine.tickHost('pve'); // Abschnitt (simuliert 10 min) fertig
+  const prog = db.getProgress('ZL2M2KFZ');
+  assert.equal(prog.nextLba, first.lba_to + 1);
+  assert.equal(prog.segments, 1);
+  // am selben Tag keine weitere Platte (seriell, derselbe Langtest läuft weiter): nächster Abschnitt startet sofort im Fenster
+  const next = db.runningRuns('pve')[0];
+  assert.equal(next.serial, 'ZL2M2KFZ');
+  assert.equal(next.lba_from, first.lba_to + 1);
+});
+
+test('Test wird zur Sperrzeit abgebrochen und danach nicht neu gestartet', async () => {
+  const { engine, db, world, advance, clock } = setup(new Date(2026, 10, 3, 18, 50));
+  world.opts.testMinutes = 999;
+  await engine.pollHost('router');
+  const sda = db.disksOfHost('router').find((d) => d.device === '/dev/sda');
+  await engine.startNow('router', sda.serial, { test: 'long', minutes: 10 }, 'manual');
+  assert.equal(db.runningRuns('router').length, 1);
+  advance(9); // 18:59
+  await engine.tickHost('router');
+  assert.equal(db.runningRuns('router').length, 0, 'abgebrochen vor 19:00');
+  assert.equal(db.runsOfDisk(sda.serial)[0].result, 'interrupted');
+  advance(30); await engine.tickHost('router');
+  assert.equal(db.runningRuns('router').length, 0, 'in der Sperrzeit startet nichts');
+  assert.equal(clock().getHours(), 19);
+});
+
+test('Montag startet nichts (auch nicht manuell)', async () => {
+  const { engine, db } = setup(new Date(2026, 10, 2, 10, 0));
+  await engine.pollHost('router');
+  await engine.tickHost('router');
+  assert.equal(db.runningRuns('router').length, 0);
+  const sda = db.disksOfHost('router')[0];
+  const r = await engine.startManual('router', sda.serial, 'short');
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /Wochentag/);
+});
+
+test('pbs: Banner-Wahl „Heute nicht“ verhindert den Start, „Jetzt“ erlaubt ihn', async () => {
+  const { engine, db } = setup(new Date(2026, 10, 3, 10, 0));
+  engine.db.setHostSettings('pbs', { autoStart: false });
+  await engine.pollHost('pbs');
+  await engine.tickHost('pbs');
+  assert.equal(db.runningRuns('pbs').length, 0, 'ohne Klick kein Start');
+  engine.setApproval('pbs', 'now');
+  await engine.tickHost('pbs');
+  assert.equal(db.runningRuns('pbs').length, 1);
+});
+
+test('Standardwerte je Host-Art', () => {
+  assert.equal(defaultsForHost({ kind: 'dauer' }).window.to, '24:00');
+  assert.equal(defaultsForHost({ kind: 'manuell' }).mode, 'manuell');
+  assert.deepEqual(defaultsForHost({ kind: 'fest' }).blockedWeekdays, [1]);
+});
