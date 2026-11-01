@@ -66,7 +66,7 @@ export function summarize({ runs, disks, now, tempDaily = [], pools = [] }) {
 
   return {
     totals: {
-      runs: runs.length, ok, failed, interrupted, running: runs.length - done.length, successRate: completed ? Math.round((ok / completed) * 100) : null,
+      runs: runs.length, ok, failed, interrupted, running: runs.length - done.length, successRate: completed ? Math.floor((ok / completed) * 1000) / 10 : null, // abgerundet: 100 heißt wirklich keine Fehlschläge
       last30: runs.filter((r) => t - r.started <= 30 * DAY).length, last365: runs.filter((r) => t - r.started <= 365 * DAY).length,
       longCompleted: runs.filter((r) => r.completesLong).length, hoursTested: Math.round(minutesTotal / 6) / 10,
     },

@@ -1,28 +1,14 @@
 // Oberfläche von pve-disk-tool. Reines JavaScript ohne Abhängigkeiten.
 // Alle Texte werden per textContent eingesetzt, nie als HTML (kein XSS durch Gerätenamen o. Ä.).
 
-const WD = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
-const KIND = { hdd: 'HDD', ssd: 'SATA-SSD', nvme: 'NVMe' };
-const ICON = { ok: '✔', watch: '!', replace: '▲', critical: '✖', unknown: '?', info: 'i' };
-const LABEL = { ok: 'Gesund', watch: 'Beobachten', replace: 'Bald tauschen', critical: 'Kritisch', unknown: 'Unbekannt' };
-const RUN_LABEL = { short: 'Kurztest', long: 'Langtest', select: 'Langtest-Abschnitt', extern: 'Test (extern gestartet)' };
-const RESULT = { ok: 'ohne Fehler', failed: 'FEHLER', interrupted: 'unterbrochen', running: 'läuft' };
+import { WD, KIND, ICON, LABEL, RUN_LABEL, RESULT, h, put, d2, fmtDate, fmtDT, fmtSize, fmtAge, fmtUp, pill, fact, meter, topFinding, wearLevel, ctx, fmtDay, fmtMin, dur } from './dom.js';
+
+import { globalStats, hostStatsSection } from './stats-view.js';
+import { runningPanel, hostTestsPanel, allTestsPanel } from './tests-view.js';
+import { hostPage } from './host-view.js';
 
 const root = document.getElementById('app');
-let data = null, view = 'uebersicht', authState = { passwordSet: false, loggedIn: true }, timer = null, dialogOpen = false, flash = {};
-
-function h(tag, props = {}, ...kids) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(props ?? {})) {
-    if (v == null || v === false) continue;
-    if (k === 'class') el.className = v;
-    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
-    else if (['value', 'checked', 'disabled', 'selected'].includes(k)) el[k] = v;
-    else el.setAttribute(k, v === true ? '' : v);
-  }
-  for (const kid of kids.flat(Infinity)) if (kid != null && kid !== false) el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
-  return el;
-}
+let data = null, stats = null, tests = null, view = 'uebersicht', authState = { passwordSet: false, loggedIn: true }, timer = null, dialogOpen = false, flash = {};
 
 async function api(method, path, body) {
   const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'disktool' }, body: body ? JSON.stringify(body) : undefined });
@@ -32,23 +18,6 @@ async function api(method, path, body) {
   return json;
 }
 
-// ---------- Formatierung ----------
-const d2 = (iso) => (iso ? new Date(iso) : null);
-const fmtDate = (iso) => (iso ? d2(iso).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '–');
-const fmtDT = (iso) => (iso ? d2(iso).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '–');
-const fmtSize = (b) => (b == null ? '–' : b >= 1e12 ? `${(b / 1e12).toFixed(b >= 1e13 ? 0 : 1)} TB`.replace('.', ',') : `${Math.round(b / 1e9)} GB`);
-const fmtAge = (hrs) => (hrs == null ? '–' : hrs >= 8766 ? `${(hrs / 8766).toFixed(1).replace('.', ',')} Jahre` : `${Math.round(hrs / 24)} Tage`);
-const fmtUp = (s) => (s == null ? '–' : s >= 86400 ? `${Math.floor(s / 86400)} Tage` : s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min` : `${Math.floor(s / 60)} min`);
-const pill = (level, text) => h('span', { class: `pill ${level}` }, h('span', { 'aria-hidden': 'true' }, ICON[level] ?? '?'), text ?? LABEL[level]);
-const fact = (k, v) => h('div', { class: 'fact' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
-function meter(label, pct, level, right) {
-  const bar = h('span'); bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-  return h('div', {}, h('div', { class: 'meter-label' }, h('span', {}, label), h('span', {}, right ?? `${pct} %`)), h('div', { class: `meter ${level}`, role: 'img', 'aria-label': `${label}: ${pct} Prozent` }, bar));
-}
-function topFinding(d) {
-  return d.findings.find((f) => ['critical', 'replace', 'watch'].includes(f.level)) ?? d.findings.find((f) => f.level === 'ok') ?? d.findings[0];
-}
-const wearLevel = (used) => (used >= 90 ? 'critical' : used >= 70 ? 'replace' : used >= 50 ? 'watch' : 'ok');
 
 // ---------- Aktionen ----------
 async function act(fn, okMsg) {
@@ -101,37 +70,23 @@ function hostSection(host) {
   const state = host.reachable ? `erreichbar · läuft seit ${fmtUp(host.uptimeSec)} · Stand ${fmtDT(host.lastPoll)}` : `nicht erreichbar${host.error ? ` (${host.error})` : ''}`;
   return h('section', { class: 'host' },
     h('div', { class: 'host-head' }, h('h2', {}, host.label), h('span', { class: 'state' }, state),
-      host.pools.map((p) => h('span', { class: `pool ${p.level === 'critical' ? 'critical' : ''}`, title: p.scan }, `ZFS ${p.name}: ${p.state}`)),
+      host.pools.map((p) => h('span', { class: `pool ${p.level === 'critical' ? 'critical' : ''}`, title: p.scanText }, `ZFS ${p.name}: ${p.state}`)),
       h('span', { class: 'spacer' }), h('button', { onclick: () => act(() => api('POST', `/api/hosts/${host.id}/poll`, {}), 'Aktualisiert.') }, 'Jetzt abfragen')),
     host.pools.flatMap((p) => p.findings.map((f) => h('div', { class: 'finding critical' }, h('b', {}, f.title), f.text, ' ', f.advice))),
     host.disks.length ? h('div', { class: 'grid' }, host.disks.map((d) => diskCard(host, d))) : h('p', { class: 'empty' }, host.reachable ? 'Noch keine Platten gelesen.' : 'Keine Daten, solange der Host nicht erreichbar ist. Das ist normal, wenn er ausgeschaltet ist.'));
 }
 
 function viewOverview() {
-  return [data.hosts.map(bannerEl), data.hosts.length ? data.hosts.map(hostSection) : h('p', { class: 'empty' }, 'Keine Hosts eingerichtet. Siehe docs/INSTALLATION.md.')];
+  if (!data.hosts.length) return h('p', { class: 'empty' }, 'Keine Hosts eingerichtet. Öffne den Reiter „Hosts einrichten“.');
+  return [data.hosts.map(bannerEl),
+    stats ? [globalStats(stats, data), hostStatsSection(stats, data)] : null,
+    h('div', { class: 'sec-title' }, h('h2', {}, 'Alle Platten')), data.hosts.map(hostSection)];
 }
 
 // ---------- Ansicht: Tests ----------
 function viewTests() {
-  const sections = data.hosts.map((host) => {
-    const w = host.window;
-    const status = w.open ? `Testfenster offen, noch ${Math.floor(w.minutesLeft / 60)} h ${w.minutesLeft % 60} min` : `Gerade kein Test: ${w.reason}`;
-    const rows = host.disks.map((d) => h('tr', {},
-      h('td', {}, h('div', { class: 'model' }, d.model), h('div', { class: 'sub' }, `${d.device} · ${KIND[d.kind]}`)),
-      h('td', {}, d.running ? `⏳ ${RUN_LABEL[d.running.type]}${d.running.remainingPercent != null ? ` (noch ${d.running.remainingPercent} %)` : ''}` : pill(d.level)),
-      h('td', {}, fmtDate(d.lastShortOk), h('div', { class: 'sub' }, `nächster: ${fmtDate(d.nextShort)}`)),
-      h('td', {}, fmtDate(d.lastLongOk), h('div', { class: 'sub' }, `nächster: ${d.progress ? 'läuft in Abschnitten' : fmtDate(d.nextLong)}`)),
-      h('td', {}, d.progress ? meter('Langtest', d.progress.percent, 'ok', `${d.progress.percent} % · Abschnitt ${d.progress.segments + 1}`) : (d.selective || d.kind !== 'hdd' ? '–' : h('span', { class: 'sub' }, 'keine selektiven Tests'))),
-      h('td', {}, h('div', { class: 'row' },
-        d.running ? h('button', { class: 'danger', onclick: () => abortTest(d) }, 'Abbrechen') : [h('button', { onclick: () => startTest(host, d, 'short') }, 'Kurz'), h('button', { onclick: () => startTest(host, d, 'long') }, 'Lang')],
-        h('button', { onclick: () => act(() => api('POST', `/api/disks/${encodeURIComponent(d.serial)}/pause`, { paused: !d.paused }), d.paused ? 'Fortgesetzt.' : 'Pausiert.') }, d.paused ? 'Fortsetzen' : 'Pausieren')))));
-    return h('section', { class: 'panel' },
-      h('div', { class: 'host-head' }, h('h2', {}, host.label), h('span', { class: 'state' }, status)),
-      host.decision && host.decision.reason ? h('p', { class: 'sub' }, `Zeitplan: ${host.decision.reason}`) : null,
-      host.disks.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Platte', 'Zustand', 'Kurztest', 'Langtest', 'Langtest-Fortschritt', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Keine Platten bekannt.'));
-  });
   const ev = h('section', { class: 'panel' }, h('h2', {}, 'Ereignisse'), data.events.length ? h('ul', { class: 'plain log' }, data.events.map((e) => h('li', {}, h('span', { class: 'sub' }, `${fmtDT(e.ts)} `), e.hostId ? h('b', {}, `${e.hostId}: `) : '', e.text))) : h('p', { class: 'sub' }, 'Noch nichts passiert.'));
-  return [sections, ev];
+  return [tests ? runningPanel(tests, data) : null, data.hosts.map((host) => hostTestsPanel(host)), tests ? allTestsPanel(tests, data) : null, ev];
 }
 
 // ---------- Ansicht: Zeitplan ----------
@@ -214,7 +169,6 @@ function hostsTable() {
   return data.hosts.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Host', 'Adresse', 'Art', 'Status', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Noch kein Host eingerichtet.');
 }
 
-const put = (el, ...kids) => el.append(...kids.flat(Infinity).filter((x) => x != null && x !== false));
 
 function wizardPanel() {
   const w = wizard;
@@ -310,6 +264,10 @@ function viewHelp() {
     D('Umgelagerte Sektoren (HDD)', 'Defekte Stellen, die die Platte durch Reserve ersetzt hat. Ein kleiner, gleichbleibender Wert ist verkraftbar. Steigt er, ist die Platte am Ende.'),
     D('Übertragungsfehler (CRC)', 'Fehler zwischen Platte und Controller. Liegt meist an Kabel, Stecker oder Backplane, nicht an der Platte selbst.'),
     D('Kurztest / Langtest', 'Selbsttests der Platte. Der Kurztest dauert wenige Minuten. Der Langtest liest die ganze Platte und dauert bei großen HDDs viele Stunden, wird dann auf mehrere Tage aufgeteilt. Tests laufen nie in den Sperrzeiten und nie auf mehreren Platten eines Hosts gleichzeitig.'),
+    D('ZFS-Pool und vdev', 'Ein Pool besteht aus einem oder mehreren vdevs, und ein vdev aus Platten. Fällt ein ganzes vdev aus, ist der Pool verloren. Innerhalb eines Spiegels oder RAID-Z dürfen so viele Platten ausfallen, wie dort angegeben ist.'),
+    D('Lese-, Schreib- und Prüfsummenfehler', 'ZFS zählt je Gerät Fehler mit. Prüfsummenfehler bedeuten, dass Daten beim Lesen nicht stimmten. Ein Scrub korrigiert sie meist. Steigen sie weiter, liegt es oft an Kabel, Backplane oder der Platte.'),
+    D('Scrub', 'ZFS liest dabei alle Daten und prüft sie gegen die Prüfsummen. Proxmox startet das normalerweise monatlich.'),
+    D('Statistiken', 'Auf der Startseite siehst du Tests pro Monat, wann Tests laufen, Ergebnisse, Abdeckung und Testverlauf, darunter dieselben Zahlen je Host. Der Verlauf beginnt mit dem Tag, ab dem das Tool läuft.'),
     D('Wert (0–100)', 'Grobe Kennzahl aus der Bewertung: 100 gesund, darunter schlechter. Bei SSD/NVMe höchstens die Restlebensdauer.')));
 }
 
@@ -342,6 +300,8 @@ async function openDetail(host, d) {
   document.body.append(dlg); dlg.showModal();
 }
 
+const viewHostPage = () => (stats && tests ? hostPage({ data, stats, tests }) : h('p', { class: 'empty' }, 'Lade …'));
+
 // ---------- Rahmen ----------
 function loginView() {
   const pw = h('input', { type: 'password', autocomplete: 'current-password', autofocus: true }); const msg = h('p', { class: 'error' });
@@ -354,15 +314,17 @@ function render() {
   if (dialogOpen) return;
   if (!authState.loggedIn) { root.replaceChildren(loginView()); return; }
   if (!data) { root.replaceChildren(h('p', { class: 'empty' }, 'Lade …')); return; }
-  const tabs = [['uebersicht', 'Übersicht'], ['tests', 'Tests'], ['zeitplan', 'Zeitplan & Konto'], ['hosts', 'Hosts'], ['hilfe', 'Hilfe']];
-  const body = { uebersicht: viewOverview, tests: viewTests, zeitplan: viewSettings, hosts: viewHosts, hilfe: viewHelp }[view]();
+  const tabs = [['uebersicht', 'Übersicht'], ['host', 'Hosts im Detail'], ['tests', 'Tests'], ['zeitplan', 'Zeitplan & Konto'], ['hosts', 'Hosts einrichten'], ['hilfe', 'Hilfe']];
+  const body = { uebersicht: viewOverview, host: viewHostPage, tests: viewTests, zeitplan: viewSettings, hosts: viewHosts, hilfe: viewHelp }[view]();
   const f = flash.err ? h('div', { class: 'banner warn', role: 'alert' }, h('b', {}, flash.err)) : flash.ok ? h('div', { class: 'banner', role: 'status' }, flash.ok) : null; flash = {};
+  const scrollY = window.scrollY;
   root.replaceChildren(...[
     h('header', { class: 'top' },
       h('div', { class: 'title-row' }, h('div', { class: 'summary' }, h('span', { class: `dot ${data.summary.level}`, 'aria-hidden': 'true' }), h('span', { role: 'status' }, data.summary.text)), h('span', { class: 'sub' }, `Stand ${fmtDT(data.now)}`)),
-      h('nav', { class: 'tabs', 'aria-label': 'Bereiche' }, tabs.map(([id, t]) => h('button', { 'aria-current': view === id ? 'page' : null, onclick: () => { view = id; render(); } }, t)))),
+      h('nav', { class: 'tabs', 'aria-label': 'Bereiche' }, tabs.map(([id, t]) => h('button', { 'aria-current': view === id ? 'page' : null, onclick: () => { view = id; render(); window.scrollTo(0, 0); } }, t)))),
     !authState.passwordSet ? h('div', { class: 'banner warn' }, h('span', {}, 'Es ist noch kein Passwort gesetzt. Die Seite ist nur im lokalen Netz erreichbar, aber jeder dort kann Tests starten.'), h('button', { onclick: () => { view = 'zeitplan'; render(); } }, 'Passwort setzen')) : null,
     f, body].flat(Infinity).filter(Boolean));
+  window.scrollTo(0, scrollY);
 }
 
 async function load(redraw = true) {
@@ -370,10 +332,12 @@ async function load(redraw = true) {
     const st = await fetch('/api/auth/status').then((r) => r.json());
     authState = st;
     if (!st.loggedIn) { render(); return; }
-    data = await api('GET', '/api/overview');
+    [data, stats, tests] = await Promise.all([api('GET', '/api/overview'), api('GET', '/api/stats'), api('GET', '/api/tests?limit=400')]);
     if (redraw) render();
   } catch (e) { if (!data) root.replaceChildren(h('p', { class: 'empty error' }, `Keine Verbindung: ${e.message}`)); }
 }
+
+Object.assign(ctx, { act, api, startTest, abortTest, openDetail, diskCard, render: () => render() });
 
 load();
 timer = setInterval(() => { if (view !== 'zeitplan' && view !== 'hosts' && !dialogOpen) load(); }, 20000);

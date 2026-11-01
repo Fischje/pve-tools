@@ -60,6 +60,12 @@ test('Zeitleiste: nur die letzten 14 Tage', () => {
   assert.equal(s.timeline.length, 1);
 });
 
+test('Erfolgsquote ist nur 100, wenn es keinen Fehlschlag gab', () => {
+  const runs = Array.from({ length: 335 }, () => run()).concat([run({ result: 'failed' })]);
+  assert.equal(summarize({ now, disks: [], runs }).totals.successRate, 99.7);
+  assert.equal(summarize({ now, disks: [], runs: runs.slice(0, 335) }).totals.successRate, 100);
+});
+
 test('leer: keine Division durch null', () => {
   const s = summarize({ now, disks: [], runs: [] });
   assert.equal(s.totals.successRate, null);

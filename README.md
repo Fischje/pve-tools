@@ -9,6 +9,8 @@ bleibt der Kern unberührt: dort liegen nur ein eingeschränkter SSH-Zugang und 
 - **Selbsttests mit Zeitplan:** Kurztest und Langtest einstellbar (Intervall, gesperrte Wochentage, Sperrzeiten). Immer eine
   Platte nach der anderen. Langtests, die nicht in ein Betriebsfenster passen, werden über mehrere Tage aufgeteilt.
   Berücksichtigt Server, die nachts ausgehen, und Hosts, die von Hand gestartet werden.
+- **Statistiken:** Tests pro Monat, wann Tests laufen, Ergebnisse, Abdeckung (Tage seit dem letzten Test), Testverlauf der letzten 14 Tage, Temperaturverlauf; gesamt und je Host.
+- **Host-Seite:** gruppiertes Menü mit Hosts, Pools und Platten. Je Host: Zustand der Platten, ZFS-Pools mit vdev-Baum (Fehlerzähler, Zuordnung der Geräte zu Platten, Scrub, Füllstand), laufende und alle Tests des Hosts.
 - **Verlauf:** Messwerte in SQLite, damit sichtbar wird, ob ein Fehlerwert noch steigt.
 - **Hosts aus der Oberfläche einrichten:** Assistent, der den eingeschränkten Zugang auf dem Host anlegt (einmalig mit dem root-Passwort, das nicht gespeichert wird). Kein Zugriff auf die Befehlszeile des Hosts nötig.
 - **Passwort in der Oberfläche** setzbar. Erreichbar nur aus dem lokalen Netz.
@@ -31,9 +33,10 @@ npm run demo        # Demo mit simulierten Hosts
 | `src/smart.js`, `src/rating.js`, `src/zfs.js` | SMART-Daten einlesen, Bewertung, ZFS-Status |
 | `src/schedule.js` | Zeitplanlogik als reine Funktionen (gut testbar) |
 | `src/engine.js` | Abfragen, Testergebnisse verbuchen, Tests starten und abbrechen |
+| `src/stats.js`, `src/zfs.js` | Statistik-Berechnung, ZFS-Auswertung (Pools, vdevs, Scrub) |
 | `src/server.js`, `src/auth.js`, `src/service.js` | Webserver, Passwort, Aufbereitung für die Oberfläche |
 | `src/provision.js` | Einrichtung eines Hosts aus der Oberfläche (Fingerabdruck, Passwort einmalig, Prüfung) |
-| `web/` | Oberfläche (reines JavaScript, kein Build-Schritt) |
+| `web/` | Oberfläche (reines JavaScript, kein Build-Schritt): `app.js` (Rahmen), `stats-view.js`, `host-view.js`, `tests-view.js`, `charts.js` (SVG-Diagramme) |
 | `host-setup/` | Prüfskript und Einrichtung für die Proxmox-Hosts |
 | `update.sh`, `sync.sh`, `install-sync.sh` | Aktualisierung im LXC: von Hand, alle 5 Minuten automatisch, Einrichtung des Timers |
 | `.github/workflows/` | Auto-Merge von `claude/**` nach `main` mit Tests und Secret-Scan |

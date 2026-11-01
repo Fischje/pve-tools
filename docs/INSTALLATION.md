@@ -167,6 +167,7 @@ und `main` sollte als Standardzweig eingestellt sein.
   automatisch auf die vorherige Version zurück. Es ändert nichts, wenn schon alles aktuell ist, und bricht bei lokalen Änderungen im Programmordner ab.
   Einstellungen, Passwort, Hostliste und Verlauf liegen in `data/` und bleiben unberührt.
 - **Mit Docker:** `cd /opt/pve-disk-tool && git pull && docker compose up -d --build`.
+- **Neue Prüfskript-Version:** Die ZFS-Füllstände (Größe, belegt, frei) kommen über den Befehl `zpoollist` im Prüfskript auf dem Host. Hosts, die vor dieser Version eingerichtet wurden, kennen ihn noch nicht. Die Pools erscheinen dann ohne Füllstand, und die Host-Seite weist darauf hin. Dann im Reiter „Hosts einrichten“ bei dem Host „Neu einrichten“ wählen.
 - **Zugang auf den Hosts erneuern:** Nur nötig, wenn in den Hinweisen zu einer neuen Version steht, dass sich `host-setup/gate.sh` geändert hat.
   Dann im Reiter „Hosts“ bei jedem Host „Neu einrichten“ wählen. Sonst bleibt der Zugang unverändert gültig.
 

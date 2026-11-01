@@ -32,8 +32,9 @@ export function seedDemo(db, hosts, now) {
         if (!interrupted) lastShort = started;
       }
       // Langtests: etwa alle drei Monate
-      for (const m of [10, 7, 4, 1]) {
-        const failedCase = d.serial === 'ZHZ0RHKE' && m === 7;
+      const shift = [0, 1, 2, 0, 3, 5][i % 6]; // manche Platten sind mit dem Langtest überfällig
+      for (const [k, m] of [10, 7, 4, 1].map((x) => x + shift).entries()) {
+        const failedCase = d.serial === 'ZHZ0RHKE' && k === 1; // der Lesefehler der Seagate im zweitältesten Langtest
         const first = allowedDay(new Date(now.getFullYear(), now.getMonth() - m, 4 + (i % 8), 0));
         if (first > now) continue;
         const segments = hdd && seg ? (d.polling_extended > 900 ? 3 : 2) : 1;

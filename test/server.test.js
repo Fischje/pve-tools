@@ -1,10 +1,13 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/db.js';
 import { Engine } from '../src/engine.js';
 import { Auth, hashPassword, verifyPassword } from '../src/auth.js';
 import { HostClient } from '../src/hostapi.js';
 import { DemoWorld, DemoTransport } from '../src/demo/world.js';
+// Server immer schließen, auch wenn ein Test vorher fehlschlägt (sonst hängt der Lauf).
+const openApps = [];
+after(() => { for (const a of openApps) { a.closeAllConnections?.(); a.close(); } });
 import { createApp, isPrivateIp } from '../src/server.js';
 import { cleanSettings } from '../src/service.js';
 
@@ -16,6 +19,7 @@ async function boot() {
   for (const h of world.hosts) await engine.pollHost(h.id);
   const auth = new Auth(db);
   const app = createApp({ db, engine, auth, allowPublic: true });
+  openApps.push(app);
   await new Promise((r) => app.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.address().port}`;
   const call = async (method, path, body, cookie) => {
@@ -129,6 +133,7 @@ async function bootSeeded() {
   const { seedDemo } = await import('../src/demo/seed.js');
   seedDemo(db, world.hosts, clock());
   const app = createApp({ db, engine, auth: new Auth(db), allowPublic: true });
+  openApps.push(app);
   await new Promise((r) => app.listen(0, '127.0.0.1', r));
   const get = (p) => fetch(`http://127.0.0.1:${app.address().port}${p}`).then((r) => r.json());
   return { get, close: () => app.close(), db, engine };

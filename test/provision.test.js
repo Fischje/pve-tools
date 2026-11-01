@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -8,6 +8,9 @@ import { openDb } from '../src/db.js';
 import { Engine } from '../src/engine.js';
 import { Auth } from '../src/auth.js';
 import { Provisioner, buildRemoteScript, shq, writeHostsFile } from '../src/provision.js';
+// Server immer schließen, auch wenn ein Test vorher fehlschlägt (sonst hängt der Lauf).
+const openApps = [];
+after(() => { for (const a of openApps) { a.closeAllConnections?.(); a.close(); } });
 import { createApp } from '../src/server.js';
 
 const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPubkeyPubkeyPubkeyPubkeyPubkeyPubkey diskmon@pve-disk-tool';
@@ -152,6 +155,7 @@ async function boot({ withProvisioner = true } = {}) {
   const db = s.engine.db;
   const auth = new Auth(db);
   const app = createApp({ db, engine: s.engine, auth, allowPublic: true, provisioner: withProvisioner ? s.prov : null });
+  openApps.push(app);
   await new Promise((r) => app.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.address().port}`;
   let cookie = '';
