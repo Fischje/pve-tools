@@ -121,3 +121,26 @@ test('Standardwerte je Host-Art', () => {
   assert.equal(defaultsForHost({ kind: 'manuell' }).mode, 'manuell');
   assert.deepEqual(defaultsForHost({ kind: 'fest' }).blockedWeekdays, [1]);
 });
+
+test('nach einem unterbrochenen Test wird dieselbe Platte nicht sofort neu gestartet (keine Endlosschleife)', async () => {
+  const { engine, db, advance } = setup(new Date(2026, 10, 3, 9, 0));
+  await engine.pollHost('router');
+  const sda = db.disksOfHost('router').find((d) => d.device === '/dev/sda');
+  const id = db.addRun({ serial: sda.serial, hostId: 'router', kind: 'long', started: new Date(2026, 10, 3, 8, 59), hoursAtStart: 1 });
+  db.finishRun(id, 'interrupted', new Date(2026, 10, 3, 9, 0), 'Test');
+  assert.equal(engine.buildState('router').disks.find((d) => d.serial === sda.serial).cooldown, true);
+  await engine.tickHost('router');
+  assert.ok(!db.runningRuns('router').some((r) => r.serial === sda.serial), 'dieselbe Platte startet nicht erneut');
+  advance(13 * 60); // nach 13 Stunden ist die Wartezeit vorbei
+  assert.equal(engine.buildState('router').disks.find((d) => d.serial === sda.serial).cooldown, false);
+});
+
+test('NVMe-Langtest im Demo wird richtig verbucht (kein „unterbrochen“)', async () => {
+  const { engine, db, advance } = setup(new Date(2026, 10, 3, 9, 0));
+  await engine.pollHost('router');
+  const nv = db.disksOfHost('router').find((d) => d.device === '/dev/nvme0n1');
+  await engine.startNow('router', nv.serial, { test: 'long', minutes: 10 }, 'manual');
+  advance(20); await engine.pollHost('router');
+  assert.equal(db.runsOfDisk(nv.serial)[0].result, 'ok');
+  assert.ok(db.getDisk(nv.serial).last_long_ok);
+});

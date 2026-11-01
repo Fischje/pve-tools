@@ -4,6 +4,8 @@ import { rate } from './rating.js';
 import { ratePool } from './zfs.js';
 
 const MIN = 60000;
+// Nach einem unterbrochenen Test wird dieselbe Platte erst nach dieser Zeit erneut gestartet (Schutz vor Endlosschleifen).
+const COOLDOWN_MS = 12 * 60 * MIN;
 
 /** Voreinstellungen je Host-Art aus hosts.json: 'fest' (Standard), 'dauer' (immer an), 'manuell'. */
 export function defaultsForHost(host) {
@@ -102,8 +104,10 @@ export class Engine {
     const ap = this.db.getApproval(hostId);
     const disks = this.db.disksOfHost(hostId).map((d) => {
       const run = running.get(d.serial);
+      const lastRun = this.db.runsOfDisk(d.serial, 1)[0];
+      const cooldown = !!lastRun && lastRun.result === 'interrupted' && lastRun.ended != null && now - lastRun.ended < COOLDOWN_MS;
       return {
-        serial: d.serial, device: d.device, kind: d.kind, paused: !!d.paused,
+        serial: d.serial, device: d.device, kind: d.kind, paused: !!d.paused, cooldown,
         pollingShort: d.polling_short, pollingExtended: d.polling_extended, selective: !!d.selective, totalLba: d.total_lba,
         lastShortOk: d.last_short_ok ? new Date(d.last_short_ok) : null, lastLongOk: d.last_long_ok ? new Date(d.last_long_ok) : null,
         longProgress: this.db.getProgress(d.serial), lbaPerMin: d.lba_per_min,

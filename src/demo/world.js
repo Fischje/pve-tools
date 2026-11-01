@@ -2,9 +2,10 @@
 import * as fx from './fixtures.js';
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
-function as(json, device, serial, model) {
+function as(json, device, serial, model, capBytes) {
   const j = clone(json);
   j.device.name = device; j.serial_number = serial; if (model) j.model_name = model;
+  if (capBytes) j.user_capacity = { blocks: Math.round(capBytes / 512), bytes: capBytes };
   return j;
 }
 
@@ -24,8 +25,8 @@ export function demoDefinition() {
   const disks = {
     router: [
       as(fx.wdSsd86(), '/dev/sda', '210623444409', 'WDC WDS500G2B0A-00SM50'),
-      as(fx.nvme({ used: 4, model: 'WD Red SN700 500GB' }), '/dev/nvme0n1', '25434G800337', 'WD Red SN700 500GB'),
-      as(fx.nvme({ used: 4, model: 'WD Red SN700 500GB' }), '/dev/nvme1n1', '25434G801133', 'WD Red SN700 500GB'),
+      as(fx.nvme({ used: 4, model: 'WD Red SN700 500GB' }), '/dev/nvme0n1', '25434G800337', 'WD Red SN700 500GB', 500107862016),
+      as(fx.nvme({ used: 4, model: 'WD Red SN700 500GB' }), '/dev/nvme1n1', '25434G801133', 'WD Red SN700 500GB', 500107862016),
     ],
     pve: [
       as(fx.exos12({ hours: 19000 }), '/dev/sda', 'ZL2M2KFZ'),
@@ -35,13 +36,13 @@ export function demoDefinition() {
       as(fx.exos12({ hours: 19300 }), '/dev/sde', 'ZTN0HZ5A'),
       as(fx.exos12({ hours: 20000, model: 'ST12000NM0248-2H3111' }), '/dev/sdf', 'ZHZ640G8', 'ST12000NM0248-2H3111'),
       as(fx.nvme({ used: 2 }), '/dev/nvme1n1', 'NJF381R004120P2202'),
-      as(fx.nvme({ used: 9, model: 'Samsung SSD 980 1TB' }), '/dev/nvme0n1', 'S649NL0T759253H', 'Samsung SSD 980 1TB'),
+      as(fx.nvme({ used: 9, model: 'Samsung SSD 980 1TB' }), '/dev/nvme0n1', 'S649NL0T759253H', 'Samsung SSD 980 1TB', 1000204886016),
     ],
     pbs: [
       as(fx.hdd6(), '/dev/sda', 'WX002XFY'),
       as(fx.hdd6({ hours: 41000 }), '/dev/sdb', '61X0A03HFKUE', 'TOSHIBA MG06ACA600E'),
       as(fx.hdd6({ hours: 36000 }), '/dev/sdc', 'WD-WX31D298FL3C', 'WDC WD60EZAZ-00ZGHB0'),
-      as(fx.nvme({ used: 0, model: 'ESO512GYLCT-EP3-2L' }), '/dev/nvme0n1', '511220816260005114', 'ESO512GYLCT-EP3-2L'),
+      as(fx.nvme({ used: 0, model: 'ESO512GYLCT-EP3-2L' }), '/dev/nvme0n1', '511220816260005114', 'ESO512GYLCT-EP3-2L', 512110190592),
     ],
   };
   const hosts = [
@@ -74,7 +75,7 @@ export class DemoWorld {
     const j = d.json; const hours = j.power_on_time.hours;
     const r = d.running; d.running = null;
     if (j.device.protocol === 'NVMe') {
-      j.nvme_self_test_log.table.unshift({ self_test_code: { value: 1, string: 'Short' }, self_test_result: { value: nibble === 0 ? 0 : nibble === 2 ? 2 : 7, string: nibble === 0 ? 'Completed without error' : 'x' }, power_on_hours: hours });
+      j.nvme_self_test_log.table.unshift({ self_test_code: r.kind === 'short' ? { value: 1, string: 'Short' } : { value: 2, string: 'Extended' }, self_test_result: { value: nibble === 0 ? 0 : nibble === 2 ? 2 : 7, string: nibble === 0 ? 'Completed without error' : 'x' }, power_on_hours: hours });
     } else {
       j.ata_smart_self_test_log.standard.table.unshift(fx.ataLogEntry(r.kind === 'short' ? 'short' : r.kind === 'select' ? 'selective' : 'extended', nibble, hours));
     }

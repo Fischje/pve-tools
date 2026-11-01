@@ -1,0 +1,14 @@
+# Start:  docker compose up -d --build
+# Die Oberfläche ist nur im lokalen Netz gedacht. BIND_IP auf die LAN-Adresse des LXC setzen (siehe .env.example).
+services:
+  disktool:
+    build: .
+    container_name: pve-disk-tool
+    restart: unless-stopped
+    ports:
+      - "${BIND_IP:-127.0.0.1}:8080:8080"
+    environment:
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      # hosts.json, SSH-Schlüssel (ssh/id_ed25519), known_hosts und die Datenbank liegen hier:
+      - ./data:/data

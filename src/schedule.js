@@ -151,7 +151,7 @@ export function decide(now, s, st) {
     if (!s.autoStart && !ap.goNow) return none('Wartet auf Freigabe per Klick');
   }
 
-  const disks = st.disks.filter((d) => !d.paused);
+  const disks = st.disks.filter((d) => !d.paused && !d.cooldown);
   const todayRuns = st.todayRuns ?? {};
 
   // Langtest hat Vorrang, aber nie am selben Tag wie ein Kurztest.

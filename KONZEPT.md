@@ -3,7 +3,7 @@
 Eine kleine, nur im LAN erreichbare Website, die den Zustand der Festplatten (HDD, SATA-SSD,
 NVMe) von Proxmox VE und Proxmox Backup Server so zeigt, dass es auch Laien verstehen.
 
-Stand: Konzeptentwurf (mit Übernahme deiner Skripte), noch kein Code.
+Stand: Erste lauffähige Version gebaut (siehe README.md). Dieses Dokument bleibt die Begründung der Regeln.
 
 ## Ziele
 
