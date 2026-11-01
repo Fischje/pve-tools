@@ -154,6 +154,17 @@ etwa **10 Stunden Testzeit pro Tag** (08:20 – 18:30).
   und plant mit dem gemessenen Wert weiter.
 - **Der Kurztest** (wenige Minuten je Platte) ist kein Problem und passt in jede Lücke.
 
+#### Beispielrechnung PBS (6-TB-HDD `/dev/sda`)
+
+Die Platte nennt 637 Minuten (≈ 10,6 Stunden) für einen Langtest. Wird der PBS um 08:00 gestartet, bleiben nach der
+Anlaufzeit bis 18:30 gut 10 Stunden. Das reicht knapp nicht für eine Platte am Stück. Wird er später gestartet,
+noch weniger. Der aufgeteilte Test löst das: Ein Rest von 1–2 Stunden folgt in der nächsten Sitzung.
+
+- Sechs HDDs nacheinander: etwa 6 × 10,6 h ≈ 64 Stunden ⇒ **6 bis 8 Sitzungen**, je nach Startzeit. Die Zahl hängt von den
+  anderen Modellen ab (jedes Modell nennt seine eigene Dauer).
+- Da der PBS nur an Tagen läuft, an denen du ihn startest, kann ein Langtest mehrere Wochen dauern. Das ist okay, weil
+  das Tool den Fortschritt merkt. Der Hinweis „letzter Langtest vor …“ wird entsprechend großzügig eingestellt (Standard 4 Monate).
+
 #### Ergebnis und Anzeige
 
 - Ein fehlgeschlagener Test (z. B. „read failure“) lässt die Stufe auf mindestens „Bald tauschen“ steigen.
@@ -392,9 +403,7 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
   zeigen echte Modellnamen, was für direkte Anbindung spricht.)
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
-- Langtest-Dauer ist für die 12-TB-Exos bekannt (1079 min). Für die 6-TB-Platten am PBS liest das Tool den Wert selbst aus.
-- Selektive Selbsttests: **Auf `pve` bestätigt** (Exos ST12000NM003G, `smartctl 7.5`: „Selective Self-test supported“,
-  Kurztest 1 Minute, Langtest 1079 Minuten). Fehlt noch für die 6-TB-HDDs auf `pbs`. Ausgabe von `smartctl -c /dev/sda` dort, Zeile
-  „Selective Self-test supported“. Ohne das lässt sich ein Langtest dort nicht über mehrere Sitzungen aufteilen. Die zwei
-  anderen Exos-Typen (ST12000NM0248) werden vom Tool beim ersten Lauf selbst geprüft.
+- Selektive Selbsttests: **Auf `pve` und `pbs` bestätigt** (`smartctl 7.5`). `pve`, Exos 12 TB: Kurztest 1 min, Langtest
+  1079 min. `pbs` (Rechnername `backup`), `/dev/sda`: Kurztest 2 min, Langtest 637 min. Die zweite Exos-Variante und die
+  übrigen PBS-Platten prüft das Tool beim ersten Lauf selbst.
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
