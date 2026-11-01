@@ -6,7 +6,7 @@
 # Aufruf (als root, einmalig pro Host):
 #   ./setup-host.sh "<öffentlicher Schlüssel aus dem LXC>" [Quell-IP des LXC]
 #   ./setup-host.sh --entfernen          # macht alles wieder rückgängig
-# Es werden keine Pakete installiert; sudo und smartmontools müssen vorhanden sein.
+# Es werden keine Pakete installiert, außer auf ausdrücklichen Wunsch (DISKMON_PAKETE_INSTALLIEREN=1): dann nur sudo und smartmontools.
 set -euo pipefail
 
 BENUTZER=diskmon
@@ -28,8 +28,20 @@ SCHLUESSEL="${1:-}"
 QUELLE="${2:-}"
 [[ "$SCHLUESSEL" =~ ^ssh-(ed25519|rsa)\ [A-Za-z0-9+/=]+(\ [^\"]*)?$ ]] || { echo "Erster Parameter muss ein öffentlicher SSH-Schlüssel sein (ssh-ed25519 AAAA…)." >&2; exit 1; }
 [[ -z "$QUELLE" || "$QUELLE" =~ ^[0-9a-fA-F:.]+$ ]] || { echo "Zweiter Parameter muss eine IP-Adresse sein." >&2; exit 1; }
-command -v sudo >/dev/null || { echo "sudo fehlt. Bitte 'apt install sudo' (kleines Paket, ändert nichts am Proxmox-Kern)." >&2; exit 1; }
-command -v smartctl >/dev/null || { echo "smartctl fehlt. Bitte 'apt install smartmontools'." >&2; exit 1; }
+# Fehlende Pakete werden nur installiert, wenn DISKMON_PAKETE_INSTALLIEREN=1 gesetzt ist (Haken in der Weboberfläche).
+paket_pruefen() { # $1 = Befehl, $2 = Paket
+  command -v "$1" >/dev/null && return 0
+  if [[ "${DISKMON_PAKETE_INSTALLIEREN:-0}" == 1 ]]; then
+    echo "Installiere Paket $2 …"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get install -y --no-install-recommends "$2" || { apt-get update -qq || true; apt-get install -y --no-install-recommends "$2"; }
+    command -v "$1" >/dev/null && return 0
+  fi
+  echo "$2 fehlt. Bitte 'apt install $2' (kleines Paket, ändert nichts am Proxmox-Kern)." >&2
+  exit 1
+}
+paket_pruefen sudo sudo
+paket_pruefen smartctl smartmontools
 [[ -f "$HIER/gate.sh" ]] || { echo "gate.sh liegt nicht neben diesem Skript." >&2; exit 1; }
 
 id "$BENUTZER" >/dev/null 2>&1 || useradd --system --create-home --home-dir "/var/lib/$BENUTZER" --shell /bin/bash "$BENUTZER"

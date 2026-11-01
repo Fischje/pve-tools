@@ -25,7 +25,27 @@ cd /opt/pve-disk-tool
 npm test            # alle Tests sollten grün sein
 ```
 
-## 3. SSH-Schlüssel und Hostliste
+## 3. Hosts einrichten
+
+### Empfohlen: aus der Weboberfläche (ohne Befehlszeile auf dem Host)
+
+1. Tool starten (Schritt 5) und unter „Zeitplan & Konto“ ein Passwort für die Seite setzen. Ohne dieses Passwort ist die Einrichtung gesperrt.
+2. Reiter **Hosts → Host hinzufügen**: Kennung, Name, Adresse und Art des Hosts eintragen.
+3. Der Assistent holt den **Fingerabdruck** des Hosts. Bestätigen, dann das **root-Passwort** des Hosts eingeben und „Einrichten“ wählen.
+
+Was dabei passiert: Das Tool erzeugt beim ersten Mal selbst einen SSH-Schlüssel (`data/ssh/`), verbindet sich **einmalig** als root per
+Passwort mit dem Host (nur im lokalen Netz, nur mit dem bestätigten Fingerabdruck), legt dort denselben eingeschränkten Zugang an wie
+`setup-host.sh` (Benutzer `diskmon`, `/etc/diskmon/gate.sh`, sudo-Regel nur für dieses Skript, Schlüssel mit festem Befehl) und prüft, ob der neue
+Zugang funktioniert. Danach erscheint der Host in der Liste. **Das Passwort wird nicht gespeichert**, nicht protokolliert und nur für diesen
+einen Verbindungsaufbau verwendet. Optional: fehlende Pakete (`sudo`, `smartmontools`) installieren. Später lässt sich der Zugang dort auch
+erneuern („Neu einrichten“) oder wieder entfernen („Zugang entfernen“).
+
+Voraussetzungen: SSH-Anmeldung per Passwort für root muss auf dem Host erlaubt sein (bei Proxmox üblich), und im LXC muss OpenSSH 8.4 oder neuer
+installiert sein (Debian 12: 9.2). Die Einrichtung ist im Demo-Modus nicht verfügbar.
+
+### Alternativ: von Hand
+
+#### SSH-Schlüssel und Hostliste
 
 ```bash
 mkdir -p /opt/pve-disk-tool/data/ssh
@@ -45,9 +65,9 @@ Host-Arten in `hosts.json`:
 
 Alles Weitere (Intervalle, gesperrte Wochentage, Sperrzeiten) stellst du später in der Oberfläche unter „Zeitplan & Konto“ ein.
 
-## 4. Jeden Host einrichten (einmalig)
+#### Jeden Host einrichten (einmalig)
 
-Auf jedem Host (`router`, `pve`, `pbs`) als root. Dazu `host-setup/gate.sh` und `host-setup/setup-host.sh`
+Nur nötig, wenn du die Einrichtung nicht über die Weboberfläche machst. Auf jedem Host (`router`, `pve`, `pbs`) als root. Dazu `host-setup/gate.sh` und `host-setup/setup-host.sh`
 auf den Host kopieren (zum Beispiel per `scp`) und ausführen. Der Schlüssel ist die Zeile aus Schritt 3, die Adresse die des LXC:
 
 ```bash
@@ -76,7 +96,9 @@ der Benutzer `diskmon` hat bewusst kein Passwort. Das Tool selbst nutzt immer de
 | Zeitüberschreitung | Firewall oder falsche Adresse in `hosts.json`. |
 | Genauer Grund | Auf dem Host `journalctl -u ssh -n 30`. Im LXC `ssh -v -i … diskmon@<host> list`. |
 
-## 5. Starten
+## 4. Starten
+
+Dieser Schritt kommt vor der Einrichtung per Weboberfläche. Das Tool startet auch ohne `hosts.json` (leere Hostliste).
 
 Mit systemd (empfohlen im LXC):
 
@@ -106,10 +128,10 @@ systemctl daemon-reload && systemctl enable --now pve-disk-tool
 Oder mit Docker: `cp .env.example .env`, `BIND_IP` anpassen, dann `docker compose up -d --build`. Der Ordner `data/`
 (mit `hosts.json` und `ssh/id_ed25519`) muss für den Benutzer `node` (UID 1000) lesbar sein: `chown -R 1000:1000 data`.
 
-Die Seite ist dann unter `http://192.168.1.20:8080` erreichbar. **Setze gleich unter „Zeitplan & Konto“ ein Passwort.**
+Die Seite ist dann unter `http://192.168.1.20:8080` erreichbar. **Setze gleich unter „Zeitplan & Konto“ ein Passwort.** Danach kannst du unter „Hosts“ deine Proxmox-Hosts einrichten (siehe Abschnitt 3).
 Das Tool beantwortet ohnehin nur Anfragen aus dem lokalen Netz.
 
-## 6. Sichern und aktualisieren
+## 5. Sichern und aktualisieren
 
 - Der Ordner `data/` enthält Datenbank, Schlüssel und Hostliste. Der LXC sollte im normalen Proxmox-Backup sein.
 - Aktualisieren: `cd /opt/pve-disk-tool && git pull && npm test && systemctl restart pve-disk-tool`.

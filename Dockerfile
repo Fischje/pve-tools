@@ -6,6 +6,7 @@ WORKDIR /app
 COPY package.json ./
 COPY src ./src
 COPY web ./web
+COPY host-setup ./host-setup
 ENV DATA_DIR=/data PORT=8080 NODE_ENV=production
 VOLUME /data
 EXPOSE 8080

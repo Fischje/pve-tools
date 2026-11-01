@@ -80,7 +80,7 @@ export function overview(engine) {
     pools.forEach((p) => levels.push(p.level));
     const dec = engine.lastDecision.get(host.id);
     return {
-      id: host.id, label: host.label ?? host.id, mode: s.mode, settings: s, reachable: !!hs?.reachable, error: hs?.error ?? null,
+      id: host.id, label: host.label ?? host.id, address: host.address ?? null, port: host.port ?? 22, kind: host.kind ?? 'fest', mode: s.mode, settings: s, reachable: !!hs?.reachable, error: hs?.error ?? null,
       lastPoll: iso(hs?.lastPoll), uptimeSec: st.uptimeSec, pools,
       window: { open: win.open, reason: win.reason, softEnd: iso(win.softEnd), minutesLeft: win.minutesLeft },
       decision: dec ? { action: dec.action, reason: dec.reason } : null,

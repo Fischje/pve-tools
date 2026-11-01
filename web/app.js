@@ -197,6 +197,107 @@ function accountPanel() {
 }
 const viewSettings = () => [data.hosts.map(hostSettingsForm), accountPanel()];
 
+
+// ---------- Ansicht: Hosts einrichten ----------
+let wizard = null; // {mode:'new'|'redo'|'remove', host?, step:1|2|3, fp?, result?}
+
+function hostsTable() {
+  const rows = data.hosts.map((host) => h('tr', {},
+    h('td', {}, h('div', { class: 'model' }, host.label), h('div', { class: 'sub' }, host.id)),
+    h('td', {}, `${host.address ?? '–'}${host.port && host.port !== 22 ? `:${host.port}` : ''}`),
+    h('td', {}, { dauer: 'immer an', fest: 'fester Rhythmus', manuell: 'Start von Hand' }[host.kind] ?? host.kind),
+    h('td', {}, host.reachable ? '✔ erreichbar' : '✖ nicht erreichbar'),
+    h('td', {}, h('div', { class: 'row' },
+      h('button', { onclick: () => { wizard = { mode: 'redo', host, step: 1 }; render(); } }, 'Neu einrichten'),
+      h('button', { onclick: () => { wizard = { mode: 'remove', host, step: 1 }; render(); } }, 'Zugang entfernen'),
+      h('button', { class: 'danger', onclick: () => confirm(`„${host.label}“ aus der Liste löschen?\nDer Zugang auf dem Host bleibt bestehen (vorher „Zugang entfernen“ wählen).`) && act(() => api('DELETE', `/api/hosts/${encodeURIComponent(host.id)}`), 'Host gelöscht.') }, 'Aus Liste löschen')))));
+  return data.hosts.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Host', 'Adresse', 'Art', 'Status', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Noch kein Host eingerichtet.');
+}
+
+const put = (el, ...kids) => el.append(...kids.flat(Infinity).filter((x) => x != null && x !== false));
+
+function wizardPanel() {
+  const w = wizard;
+  const box = h('section', { class: 'panel' });
+  const title = { new: 'Host hinzufügen', redo: `„${w.host?.label}“ neu einrichten`, remove: `Zugang auf „${w.host?.label}“ entfernen` }[w.mode];
+  const close = () => { wizard = null; render(); };
+  const msg = h('p', { class: 'error', role: 'alert' });
+  const head = h('div', { class: 'host-head' }, h('h2', {}, title), h('span', { class: 'state' }, `Schritt ${w.step} von 3`), h('span', { class: 'spacer' }), w.step < 3 ? h('button', { onclick: close }, 'Abbrechen') : null);
+
+  if (w.step === 1) {
+    const f = {
+      id: h('input', { type: 'text', placeholder: 'z. B. pve', pattern: '[a-z0-9-]+', maxlength: 32 }), label: h('input', { type: 'text', placeholder: 'z. B. pve (Hauptserver)' }),
+      address: h('input', { type: 'text', placeholder: '192.168.1.11', value: w.host?.address ?? '' }), port: h('input', { type: 'number', min: 1, max: 65535, value: w.host?.port ?? 22 }),
+      kind: h('select', {}, [['fest', 'Läuft zu festen Zeiten'], ['dauer', 'Läuft immer'], ['manuell', 'Wird von Hand gestartet, schaltet sich selbst ab']].map(([v, t]) => h('option', { value: v }, t))),
+      from: h('input', { type: 'time', value: '08:00' }), to: h('input', { type: 'text', value: '22:00', size: 6 }), dayEnd: h('input', { type: 'text', value: '19:00', size: 6 }),
+    };
+    const extra = h('div', {});
+    const drawExtra = () => extra.replaceChildren(f.kind.value === 'fest' ? h('div', { class: 'f' }, h('span', {}, 'Betriebsfenster des Hosts (von – bis)'), h('div', { class: 'row' }, f.from, '–', f.to)) : f.kind.value === 'manuell' ? h('label', { class: 'f' }, 'Tagesende (der Host schaltet sich selbst ab)', f.dayEnd) : '');
+    f.kind.addEventListener('change', drawExtra); drawExtra();
+    const go = async (btn) => {
+      msg.textContent = ''; btn.disabled = true;
+      try {
+        const r = await api('POST', '/api/setup/fingerprint', { address: f.address.value.trim(), port: Number(f.port.value) });
+        Object.assign(w, { step: 2, fp: r, form: w.mode === 'new' ? { id: f.id.value, label: f.label.value, kind: f.kind.value, window: { from: f.from.value, to: f.to.value }, dayEnd: f.dayEnd.value } : null });
+        render();
+      } catch (e) { msg.textContent = e.message; btn.disabled = false; }
+    };
+    const btn = h('button', { class: 'primary', onclick: () => go(btn) }, 'Fingerabdruck des Hosts holen');
+    put(box, head,
+      w.mode === 'new'
+        ? h('div', { class: 'form-grid' }, h('label', { class: 'f' }, 'Kennung (Kleinbuchstaben, Ziffern, Bindestrich)', f.id), h('label', { class: 'f' }, 'Anzeigename', f.label), h('label', { class: 'f' }, 'Adresse im lokalen Netz', f.address), h('label', { class: 'f' }, 'SSH-Port', f.port), h('label', { class: 'f' }, 'Art des Hosts', f.kind), extra)
+        : h('p', {}, `Host: ${w.host.address ? w.host.address + (w.host.port !== 22 ? ':' + w.host.port : '') : 'Adresse unbekannt'}`),
+      h('p', { class: 'sub' }, 'Als Nächstes wird nur der Fingerabdruck des Hosts abgefragt. Es wird noch nichts geändert und kein Passwort gesendet.'), msg, h('div', { class: 'row' }, btn));
+  } else if (w.step === 2) {
+    const keys = w.fp.keys;
+    let chosen = (keys.find((k) => k.type === 'ED25519') ?? keys[0]).sha256;
+    const pw = h('input', { type: 'password', autocomplete: 'off' });
+    const ok = h('input', { type: 'checkbox' });
+    const bind = h('input', { type: 'checkbox', checked: true });
+    const pkgs = h('input', { type: 'checkbox' });
+    const rem = h('input', { type: 'checkbox' });
+    const btn = h('button', { class: 'primary', onclick: async () => {
+      msg.textContent = '';
+      if (!ok.checked) { msg.textContent = 'Bitte bestätige zuerst den Fingerabdruck.'; return; }
+      if (!pw.value) { msg.textContent = 'Bitte das root-Passwort des Hosts eingeben.'; return; }
+      btn.disabled = true; btn.textContent = 'Läuft …';
+      const body = { action: w.mode === 'remove' ? 'remove' : 'install', fingerprint: chosen, password: pw.value, bindIp: bind.checked, installPackages: pkgs.checked, removeFromList: rem.checked };
+      if (w.mode === 'new') Object.assign(body, w.form, { address: w.fp.address, port: w.fp.port }); else body.hostId = w.host.id;
+      pw.value = '';
+      try { w.result = await api('POST', '/api/setup/run', body); } catch (e) { w.result = { ok: false, error: e.message, log: '' }; }
+      w.step = 3; await load(false); render();
+    } }, w.mode === 'remove' ? 'Zugang entfernen' : 'Einrichten');
+    put(box, head,
+      h('p', {}, `Der Host unter ${w.fp.address}${w.fp.port !== 22 ? `:${w.fp.port}` : ''} meldet diesen Fingerabdruck:`),
+      h('div', { class: 'scroll' }, h('table', {}, h('tbody', {}, keys.map((k) => h('tr', {}, h('td', {}, h('input', { type: 'radio', name: 'fp', checked: k.sha256 === chosen, onchange: () => { chosen = k.sha256; }, 'aria-label': `Fingerabdruck ${k.type}` })), h('td', {}, k.type), h('td', {}, h('code', {}, k.sha256))))))),
+      h('p', { class: 'sub' }, 'Ob das wirklich dein Host ist, siehst du in der Proxmox-Oberfläche des Hosts unter „Shell“ mit:  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub  (nur zum Vergleichen). Im eigenen lokalen Netz reicht es meist, den Fingerabdruck zu bestätigen.'),
+      h('label', {}, ok, ' Der Fingerabdruck gehört zu meinem Host.'),
+      h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'root-Passwort des Hosts (wird nur für diese Einrichtung verwendet und nicht gespeichert)', pw)),
+      w.mode === 'remove' ? h('label', {}, rem, ' Den Host danach auch aus dieser Liste löschen') : [
+        h('label', {}, bind, ' Schlüssel an die IP dieses Tools binden (empfohlen: der Zugang gilt dann nur von hier)'),
+        h('br'), h('label', {}, pkgs, ' Fehlende Pakete (sudo, smartmontools) auf dem Host installieren')],
+      h('p', { class: 'sub' }, w.mode === 'remove' ? 'Entfernt den Benutzer diskmon, das Prüfskript und die sudo-Regel vom Host.' : 'Legt auf dem Host den Benutzer „diskmon“, das Prüfskript unter /etc/diskmon und eine sudo-Regel nur für dieses Skript an. Am Proxmox-Kern ändert sich nichts.'),
+      msg, h('div', { class: 'row' }, btn, h('button', { onclick: () => { w.step = 1; render(); } }, 'Zurück')));
+  } else {
+    const r = w.result;
+    put(box, head,
+      r.ok ? h('div', { class: 'finding ok' }, h('b', {}, w.mode === 'remove' ? '✔ Zugang entfernt' : `✔ Eingerichtet${r.disks != null ? `, ${r.disks} Platten gefunden` : ''}`), w.mode === 'remove' ? 'Der Host ist wieder im Ausgangszustand.' : 'Der Host steht jetzt in der Übersicht. Die Zeitplan-Einstellungen findest du unter „Zeitplan & Konto“.')
+        : h('div', { class: 'finding critical' }, h('b', {}, '✖ Nicht erfolgreich'), r.error ?? ''),
+      r.log ? h('details', { open: !r.ok }, h('summary', {}, 'Ausgabe vom Host'), h('pre', { class: 'log' }, r.log)) : null,
+      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: close }, 'Fertig'), r.ok ? null : h('button', { onclick: () => { w.step = 2; render(); } }, 'Erneut versuchen')));
+  }
+  return box;
+}
+
+function viewHosts() {
+  const out = [];
+  if (!authState.passwordSet) out.push(h('div', { class: 'banner warn' }, h('span', {}, 'Die Einrichtung aus der Oberfläche nutzt das root-Passwort deines Hosts. Bitte setze dafür zuerst ein Passwort für diese Seite.'), h('button', { onclick: () => { view = 'zeitplan'; render(); } }, 'Passwort setzen')));
+  out.push(h('section', { class: 'panel' }, h('div', { class: 'host-head' }, h('h2', {}, 'Hosts'), h('span', { class: 'spacer' }), h('button', { class: 'primary', disabled: !authState.passwordSet || !!wizard, onclick: () => { wizard = { mode: 'new', step: 1 }; render(); } }, 'Host hinzufügen')), hostsTable(),
+    h('p', { class: 'sub' }, 'Die Einrichtung ersetzt das manuelle Ausführen von setup-host.sh auf dem Host: einmalig mit dem root-Passwort verbinden, Zugang einrichten, Passwort vergessen. Nur Hosts im lokalen Netz.')));
+  if (wizard) out.push(wizardPanel());
+  return out;
+}
+
 // ---------- Ansicht: Hilfe ----------
 function viewHelp() {
   const D = (t, text) => [h('dt', {}, t), h('dd', {}, text)];
@@ -253,8 +354,8 @@ function render() {
   if (dialogOpen) return;
   if (!authState.loggedIn) { root.replaceChildren(loginView()); return; }
   if (!data) { root.replaceChildren(h('p', { class: 'empty' }, 'Lade …')); return; }
-  const tabs = [['uebersicht', 'Übersicht'], ['tests', 'Tests'], ['zeitplan', 'Zeitplan & Konto'], ['hilfe', 'Hilfe']];
-  const body = { uebersicht: viewOverview, tests: viewTests, zeitplan: viewSettings, hilfe: viewHelp }[view]();
+  const tabs = [['uebersicht', 'Übersicht'], ['tests', 'Tests'], ['zeitplan', 'Zeitplan & Konto'], ['hosts', 'Hosts'], ['hilfe', 'Hilfe']];
+  const body = { uebersicht: viewOverview, tests: viewTests, zeitplan: viewSettings, hosts: viewHosts, hilfe: viewHelp }[view]();
   const f = flash.err ? h('div', { class: 'banner warn', role: 'alert' }, h('b', {}, flash.err)) : flash.ok ? h('div', { class: 'banner', role: 'status' }, flash.ok) : null; flash = {};
   root.replaceChildren(...[
     h('header', { class: 'top' },
@@ -275,4 +376,4 @@ async function load(redraw = true) {
 }
 
 load();
-timer = setInterval(() => { if (view !== 'zeitplan' && !dialogOpen) load(); }, 20000);
+timer = setInterval(() => { if (view !== 'zeitplan' && view !== 'hosts' && !dialogOpen) load(); }, 20000);

@@ -22,6 +22,12 @@ export class Engine {
     this.clients = new Map(); this.lastDecision = new Map(); this.busy = new Set();
   }
 
+  addHost(h) { if (this.hosts.some((x) => x.id === h.id)) throw new Error('Kennung existiert schon'); this.hosts.push(h); }
+  removeHost(id) {
+    const i = this.hosts.findIndex((x) => x.id === id);
+    if (i < 0) throw new Error('Host unbekannt');
+    this.hosts.splice(i, 1); this.clients.delete(id); this.lastDecision.delete(id);
+  }
   host(id) { const h = this.hosts.find((x) => x.id === id); if (!h) throw new Error(`Unbekannter Host: ${id}`); return h; }
   client(id) { if (!this.clients.has(id)) this.clients.set(id, this.makeClient(this.host(id))); return this.clients.get(id); }
   settings(id) { return { ...defaultsForHost(this.host(id)), ...(this.db.getHostSettings(id) ?? {}) }; }

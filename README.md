@@ -10,6 +10,7 @@ bleibt der Kern unberührt: dort liegen nur ein eingeschränkter SSH-Zugang und 
   Platte nach der anderen. Langtests, die nicht in ein Betriebsfenster passen, werden über mehrere Tage aufgeteilt.
   Berücksichtigt Server, die nachts ausgehen, und Hosts, die von Hand gestartet werden.
 - **Verlauf:** Messwerte in SQLite, damit sichtbar wird, ob ein Fehlerwert noch steigt.
+- **Hosts aus der Oberfläche einrichten:** Assistent, der den eingeschränkten Zugang auf dem Host anlegt (einmalig mit dem root-Passwort, das nicht gespeichert wird). Kein Zugriff auf die Befehlszeile des Hosts nötig.
 - **Passwort in der Oberfläche** setzbar. Erreichbar nur aus dem lokalen Netz.
 - Läuft ohne externe Abhängigkeiten (Node 22).
 
@@ -30,6 +31,7 @@ npm run demo        # Demo mit simulierten Hosts
 | `src/schedule.js` | Zeitplanlogik als reine Funktionen (gut testbar) |
 | `src/engine.js` | Abfragen, Testergebnisse verbuchen, Tests starten und abbrechen |
 | `src/server.js`, `src/auth.js`, `src/service.js` | Webserver, Passwort, Aufbereitung für die Oberfläche |
+| `src/provision.js` | Einrichtung eines Hosts aus der Oberfläche (Fingerabdruck, Passwort einmalig, Prüfung) |
 | `web/` | Oberfläche (reines JavaScript, kein Build-Schritt) |
 | `host-setup/` | Prüfskript und Einrichtung für die Proxmox-Hosts |
 | `src/demo/` | Beispieldaten und simulierte Hosts für Tests und Demo |

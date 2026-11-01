@@ -94,3 +94,8 @@ ul.plain { list-style: none; padding: 0; margin: 0; }
 .help dt { font-weight: 650; margin-top: 12px; }
 .help dd { margin: 2px 0 0; color: var(--muted); }
 @media (max-width: 520px) { .summary { font-size: 1.05rem; } .grid { grid-template-columns: 1fr; } }
+
+pre.log { background: var(--panel2); border-radius: 8px; padding: 10px; overflow: auto; max-height: 320px; font-size: .8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+code { background: var(--panel2); border-radius: 4px; padding: 1px 5px; overflow-wrap: anywhere; }
+details summary { cursor: pointer; margin: 8px 0; }
+.panel2 { margin: 10px 0; }

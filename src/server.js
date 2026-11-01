@@ -4,30 +4,22 @@ import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import net from 'node:net';
 import { openDb } from './db.js';
 import { Engine } from './engine.js';
 import { Auth } from './auth.js';
 import { HostClient } from './hostapi.js';
 import { SshTransport } from './transport.js';
 import { overview, diskDetail, cleanSettings } from './service.js';
+import { isPrivateIp } from './net.js';
+import { Provisioner, writeHostsFile } from './provision.js';
+
+export { isPrivateIp };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'web');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
-/** true für Adressen im lokalen Netz (RFC 1918, Loopback, Link-Local, IPv6-ULA). */
-export function isPrivateIp(ip) {
-  let a = String(ip ?? '').replace(/^::ffff:/, '');
-  if (net.isIPv4(a)) {
-    const [o1, o2] = a.split('.').map(Number);
-    return o1 === 10 || o1 === 127 || (o1 === 172 && o2 >= 16 && o2 <= 31) || (o1 === 192 && o2 === 168) || (o1 === 169 && o2 === 254);
-  }
-  a = a.toLowerCase();
-  return a === '::1' || a.startsWith('fc') || a.startsWith('fd') || a.startsWith('fe80');
-}
-
-export function createApp({ db, engine, auth, allowPublic = false }) {
+export function createApp({ db, engine, auth, allowPublic = false, provisioner = null }) {
   const send = (res, status, body, headers = {}) => {
     const isStr = typeof body === 'string';
     res.writeHead(status, { 'Content-Type': isStr ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
@@ -61,6 +53,30 @@ export function createApp({ db, engine, auth, allowPublic = false }) {
       if (b.remove) { auth.removePassword(); return send(res, 200, { ok: true }, { 'Set-Cookie': auth.clearCookie() }); }
       try { auth.setPassword(b.password); } catch (e) { return send(res, 400, { error: e.message }); }
       return send(res, 200, { ok: true }, { 'Set-Cookie': auth.issue() });
+    }
+
+    // ---- Host aus der Oberfläche einrichten ----
+    if (url.pathname.startsWith('/api/setup/') || (req.method === 'DELETE' && /^\/api\/hosts\/[^/]+$/.test(url.pathname))) {
+      if (!provisioner) return send(res, 400, { error: 'Die Einrichtung aus der Oberfläche ist im Demo-Modus nicht verfügbar.' });
+      if (!auth.hasPassword()) return send(res, 403, { error: 'Bitte zuerst unter „Zeitplan & Konto“ ein Passwort für diese Oberfläche setzen. Die Einrichtung verwendet das root-Passwort deines Hosts.' });
+      const key = `setup:${ip}`;
+      if (auth.tooMany(key)) return send(res, 429, { error: 'Zu viele Versuche. Bitte in 10 Minuten erneut versuchen.' });
+      try {
+        if (route === 'POST /api/setup/fingerprint') {
+          const b = await readBody(req);
+          const r = await provisioner.scan({ address: b.address, port: b.port });
+          return send(res, 200, { address: r.address, port: r.port, keys: r.keys.map(({ type, sha256 }) => ({ type, sha256 })) });
+        }
+        if (route === 'POST /api/setup/run') {
+          const b = await readBody(req);
+          const r = await provisioner.run(b);
+          if (!r.ok) auth.noteFail(key);
+          return send(res, r.ok ? 200 : 502, r);
+        }
+        const dm = /^\/api\/hosts\/([^/]+)$/.exec(url.pathname);
+        if (dm && req.method === 'DELETE') { await provisioner.removeHost(decodeURIComponent(dm[1])); return send(res, 200, { ok: true }); }
+      } catch (e) { auth.noteFail(key); return send(res, 400, { error: e.message }); }
+      return send(res, 404, { error: 'Nicht gefunden' });
     }
     if (route === 'GET /api/overview') return send(res, 200, overview(engine));
     let m;
@@ -159,7 +175,9 @@ async function main() {
 
   const engine = new Engine({ db, hosts, makeClient, now, log });
   const auth = new Auth(db);
-  const app = createApp({ db, engine, auth, allowPublic: env.ALLOW_PUBLIC === '1' });
+  const hostsFile = path.join(dataDir, 'hosts.json');
+  const provisioner = demo ? null : new Provisioner({ engine, dataDir, repoDir: ROOT, persist: (list) => writeHostsFile(hostsFile, list) });
+  const app = createApp({ db, engine, auth, allowPublic: env.ALLOW_PUBLIC === '1', provisioner });
   const port = Number(env.PORT ?? 8080), listen = env.LISTEN ?? '0.0.0.0';
   app.listen(port, listen, () => log(`pve-disk-tool läuft auf http://${listen}:${port} (nur lokales Netz)`));
 
