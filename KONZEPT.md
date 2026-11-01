@@ -3,7 +3,7 @@
 Eine kleine, nur im LAN erreichbare Website, die den Zustand der Festplatten (HDD, SATA-SSD,
 NVMe) von Proxmox VE und Proxmox Backup Server so zeigt, dass es auch Laien verstehen.
 
-Stand: Konzeptentwurf, noch kein Code.
+Stand: Konzeptentwurf (mit Übernahme deiner Skripte), noch kein Code.
 
 ## Ziele
 
@@ -13,7 +13,9 @@ Stand: Konzeptentwurf, noch kein Code.
    Handlungsempfehlung. Rohwerte gibt es nur zum Aufklappen.
 3. **Mehrere Hosts, eine Oberfläche.** PVE und PBS (und weitere) werden vom selben LXC abgefragt.
 4. **Verlauf.** Gespeicherte Messwerte machen Trends sichtbar („steigt der Wert noch?“).
-5. **Nur lesen.** Das Tool darf nichts am Host ändern und keine Tests starten, die Platten belasten.
+5. **Bestehende Funktionen bleiben.** Alles, was deine Skripte heute können (siehe nächster Abschnitt),
+   gibt es auch im Interface. Schreibend ist nur eine Aktion erlaubt: SMART-Selbsttests starten
+   (und abbrechen). Sonst nichts am Host.
 
 ## Architektur
 
@@ -40,8 +42,13 @@ Benutzers, überlebt Updates, im Notfall mit drei Befehlen rückbaubar):
 - Eintrag in `~diskmon/.ssh/authorized_keys` mit
   `restrict,command="…"`. Der Befehl lässt nur eine feste Liste erlaubter Aufrufe durch
   (`$SSH_ORIGINAL_COMMAND` wird gegen eine Positivliste geprüft). Keine Shell, kein Forwarding.
-- `/etc/sudoers.d/diskmon`: erlaubt nur `smartctl -j …`, `lsblk -J …` und `zpool status -p`.
-  (NVMe-Geräte sind `root`-only, daher sudo statt Gruppenrechten.)
+- Der feste Befehl ist ein kleines Prüfskript `/etc/diskmon/gate.sh` (gehört `root`, unter `/etc`,
+  also von Updates unberührt). Es erlaubt nur eine Positivliste:
+  `smartctl -j -a`, `smartctl -j -x`, `lsblk -J`, `zpool status -p` sowie
+  `smartctl -t short|long` und `smartctl -X`. Das Gerät muss in der aktuellen
+  `lsblk`-Liste stehen und zu `/dev/sd[a-z]+` oder `/dev/nvme[0-9]+` passen. Alles andere wird abgelehnt.
+- `/etc/sudoers.d/diskmon`: erlaubt `diskmon` nur, genau dieses Prüfskript als `root` zu starten
+  (keine Platzhalter auf `smartctl`). NVMe-Geräte sind `root`-only, daher sudo.
 - `smartmontools` muss vorhanden sein. Auf PVE und PBS ist es normalerweise schon installiert.
 
 Der Sammler ruft `smartctl -j -a -n standby` auf. Mit `-n standby` werden schlafende HDDs nicht
@@ -66,7 +73,41 @@ Node-Anwendung, die auch direkt per `systemd` im LXC laufen kann. **Empfehlung:*
 - Optional ein einfaches Passwort (Basic Auth) per Umgebungsvariable.
 - SSH-Schlüssel und Host-Liste liegen nur im LXC (Volume, nie im Git). `.env`, Schlüssel und
   Datenbank kommen in die `.gitignore`.
+- Selbsttests starten nur nach Rückfrage, nie mehrere Langtests gleichzeitig auf demselben Host, und nur eine
+  begrenzte Zahl pro Tag.
 - Ausgaben der Hosts werden nie als Shell-Befehl oder HTML interpretiert (Escaping im Frontend).
+
+## Übernahme deiner bisherigen Skripte
+
+| Skript | Was es kann | Im Interface |
+|--------|-------------|--------------|
+| `disk_zustand.sh` / `disk_age.sh` | Tabelle: Gerät, Modell, Typ, Score, Verschleiß/Health, Stunden, Status; farbig | **Übersicht** (Tabellen- und Kartenansicht): gleiche Spalten, plus Klartext. Beide Skripte werden zu einer Bewertung zusammengeführt |
+| `disk_age.sh` | Health-Text (EXCELLENT … POOR), Status „ALT“ ab 30000 h | Health-Text bleibt (Spalte „Zustand“), „Alt“-Hinweis ab 30000 Betriebsstunden bleibt |
+| `disk_zustand.sh` | Score 0–100, CRC-Fehler, „REPLACE SOON“ | Score bleibt als Zahl sichtbar (abgeleitet aus den Stufen unten). CRC wird zum Kabel-Hinweis |
+| `disk_test.sh` | SHORT oder LONG Selbsttest auf allen Platten starten, Dauerhinweise | Button „Kurztest“ / „Langtest“ pro Platte und „für alle Platten“, mit Rückfrage und Dauerhinweis |
+| `disk_ergebnisse.sh` | Status des laufenden Tests und die letzten 4 Testergebnisse | **Tests**-Ansicht: laufender Test mit Fortschritt, die letzten Ergebnisse pro Platte |
+
+Beim Übernehmen fallen folgende Schwächen auf, die dann behoben sind:
+
+- `disk_ergebnisse.sh` sucht nur nach `# 1` bis `# 4`. Das ist das ATA-Format. Bei NVMe sieht das
+  Testprotokoll anders aus, dort kommt vermutlich nichts an. Mit `smartctl -j` (JSON) gibt es
+  für beide Typen dieselbe Struktur.
+- `disk_test.sh` prüft nur, ob `smartctl -t` angenommen wurde. Das Tool zeigt zusätzlich, ob
+  der Test wirklich läuft und wie er ausging.
+- `disk_test.sh` startet auf **allen** Platten gleichzeitig. Auf einem PBS mit ohnehin hohem
+  IO-Delay ist das heikel. Das Tool warnt davor und bietet an, die Tests nacheinander zu starten
+  (Standard).
+- Die Tests laufen auf dem Host selbst (die Platte führt sie intern aus). Das Tool stößt sie nur an
+  und liest später das Ergebnis.
+
+### Nicht übernommen: `enable-aspm.sh`
+
+Das ist ein fremdes Skript (Luis R. Rodriguez, ISC-Lizenz), das per `setpci` PCIe-Register
+ändert, um Stromsparen (ASPM) zu erzwingen. Es hat mit Plattengesundheit nichts zu tun, schreibt
+direkt in die Hardware-Konfiguration des Hosts (nach einem Neustart wieder weg) und passt weder
+zu „Host bleibt unberührt“ noch in eine Weboberfläche. Es bleibt außen vor. Wenn du willst,
+kann ich es getrennt als Notiz oder Anleitung für den Host festhalten. Die hochgeladene Datei
+war außerdem eine als HTML gespeicherte GitHub-Seite und kein reines Skript.
 
 ## Bewertung
 
@@ -131,11 +172,12 @@ wichtigste Information.
 
 1. **Übersicht:** Eine Kachel pro Host, darunter pro Platte eine Karte mit Ampel, Name/Modell/
    Größe, Alter, Temperatur, einem Satz „Was heißt das?“ und der Empfehlung.
-2. **Detailansicht** (aufklappbar): Rohwerte, Selftest-Verlauf, Diagramme (Temperatur,
+2. **Tests:** Laufende Selbsttests mit Fortschritt, letzte Ergebnisse, Buttons zum Starten/Abbrechen.
+3. **Detailansicht** (aufklappbar): Rohwerte, Selftest-Verlauf, Diagramme (Temperatur,
    Verschleiß, Fehlerzähler über Zeit).
-3. **Kopfzeile:** „Alles in Ordnung“ bzw. „2 Platten brauchen Aufmerksamkeit“ und Zeit der
+4. **Kopfzeile:** „Alles in Ordnung“ bzw. „2 Platten brauchen Aufmerksamkeit“ und Zeit der
    letzten Abfrage. Wirkt auch auf dem Handy.
-4. **Legende** mit kurzen Erklärungen („Was ist ein umgelagerter Sektor?“) für Nicht-Experten.
+5. **Legende** mit kurzen Erklärungen („Was ist ein umgelagerter Sektor?“) für Nicht-Experten.
 
 Später möglich (nicht im ersten Wurf): Benachrichtigung per Mail/Telegram bei Stufenwechsel,
 Export für Grafana.
@@ -181,6 +223,7 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
   (Dann kann `smartctl -d …` nötig sein.)
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
-- Sollen auch Self-Tests gestartet werden dürfen oder strikt nur lesen? (Empfehlung: nur lesen, Tests
-  weiter über Proxmox oder `smartd`.)
+- Selbsttests starten ist gesetzt (wie `disk_test.sh`). Fragen dazu: Sollen Tests auch nach Zeitplan laufen
+  (z. B. Kurztest wöchentlich, Langtest monatlich), oder weiter nur per Knopfdruck?
+- Soll `enable-aspm.sh` getrennt dokumentiert werden (siehe oben)?
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
