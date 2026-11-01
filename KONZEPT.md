@@ -181,6 +181,39 @@ Node-Anwendung, die auch direkt per `systemd` im LXC laufen kann. **Empfehlung:*
   begrenzte Zahl pro Tag.
 - Ausgaben der Hosts werden nie als Shell-Befehl oder HTML interpretiert (Escaping im Frontend).
 
+## Deine Hosts und Platten
+
+Stand laut Screenshots der Proxmox-Oberfläche (Karte „Disks“ je Knoten):
+
+| Host | Läuft | Platten | Rolle für das Tool |
+|------|-------|---------|--------------------|
+| **router** (PVE) | immer an | 2 × WD Red SN700 500 GB (NVMe), 1 × WDC WDS500G2B0A 500 GB (SATA-SSD) | **Hier läuft der LXC mit dem Tool.** Wird wie die anderen per SSH abgefragt, auch der eigene Host |
+| **pve** (PVE) | 08:00 – 22:00 | 6 × 12 TB Exos (4 × ST12000NM003G, 2 × ST12000NM0248), 3 × Lexar NM790 4 TB, 2 × Samsung 980 1 TB (Systemplatten) | Der große Test: die sechs 12-TB-HDDs |
+| **pbs** | Start von Hand (montags automatisch 07:50), aus um 19:00 | 6 × 6 TB HDD (Toshiba MG06ACA600E, WD WD60EZAZ, 2 × Toshiba HDWN160, WD WD64PURZ, Seagate ST6000NM019B), 1 × ESO 512 GB NVMe (System) | HDD-Tests in Sitzungen, siehe oben |
+
+Folgen für das Konzept:
+
+- **Der LXC läuft auf dem immer eingeschalteten `router`.** Damit ist das Tool selbst immer da. Der Zeitplan
+  und die Historie gehen nicht verloren, wenn `pve` nachts ausgeht. Der LXC sollte vom normalen Proxmox-Backup
+  gesichert werden, weil in ihm die Datenbank liegt.
+- **Für `router`** gibt es keine Anlaufzeit und kein Herunterfahren. Hier gilt nur die Sperrzeit (19:00–01:00)
+  und der gesperrte Montag. Das Testfenster ist 01:00–19:00 (abzüglich Sicherheitsabstand), also groß genug für alles.
+  Die kleinen SSDs sind in Minuten bis wenigen Stunden fertig.
+- **Auf `pve` und `pbs` gleichzeitig** darf getestet werden (verschiedene Hosts), pro Host aber immer nur eine Platte.
+  Das ist wichtig, weil die Platten eines ZFS-Pools zusammengehören: Würden mehrere Platten desselben Pools
+  gleichzeitig getestet, wäre der Pool langsamer und nicht mehr redundant belastbar.
+- **Automatischer Start auf dem PBS** ist gewünscht und wird zum Standard (mit Banner und „Heute nicht“).
+- **Anzeige „Wearout“ in Proxmox:** Beim NVMe bedeutet die Zahl vermutlich „verbraucht“ (z. B. 4 % bei den WD Red,
+  1–2 % bei den Lexar, 9 % bei den Samsung, alle sehr gesund). Bei der SATA-SSD im `router` steht 86 %. Bei SATA-Platten
+  zeigt Proxmox meist den normalisierten Wert, bei dem **100 neu und kleiner schlechter** bedeutet. Das wären dann 86 %
+  Restlebensdauer, also unauffällig. Die Zahlen sind also nicht einheitlich gemeint. Genau das soll das Tool klarstellen
+  („Verschleiß 14 %, Restlebensdauer 86 %“). Ob die 86 % wirklich „Rest“ heißen, bestätigt `smartctl -a /dev/sda`
+  auf dem `router`.
+- **Auffälliges auf dem PBS:** Die WD60EZAZ ist nach meinem Wissen eine SMR-Platte (Shingled Magnetic Recording).
+  SMR und ZFS vertragen sich schlecht, besonders bei Resilver und beim Schreiben vieler kleiner Blöcke. Das könnte
+  zum hohen IO-Delay beitragen, den du im August auf dem PBS hattest. Das Tool kann künftig ein „Bekannte SMR-Modelle“-Hinweis
+  zeigen, das ist aber ein späterer Zusatz und keine Bewertung der Gesundheit.
+
 ## Übernahme deiner bisherigen Skripte
 
 | Skript | Was es kann | Im Interface |
@@ -329,11 +362,8 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
   (Dann kann `smartctl -d …` nötig sein.)
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
-- Welche Platten hängen am PVE, welche am PBS? (Die sechs 12-TB-Exos und die Lexar-NVMe: auf welchem Host?)
-- Der PBS startet nur von Hand (außer montags): Soll sein Test nach dem Hochfahren automatisch starten (mit Banner und
-  „Heute nicht“), oder immer erst nach einem ausdrücklichen Klick?
-- Läuft der LXC mit dem Tool auf dem PVE? Dann ist er nachts aus, und der PBS kann nur getestet werden, wenn der PVE ebenfalls läuft.
-- Langtest-Dauer ist bekannt (Exos: 1079 min); es fehlen die zweite Exos-Variante (ST12000NM0248) und die Lexar-NVMe.
-  Das Tool liest den Wert ohnehin selbst aus.
-- Unterstützt die Exos selektive Selbsttests? (Ausgabe von `smartctl -c /dev/sda`, Zeile „Selective Self-test supported“.)
+- Langtest-Dauer ist für die 12-TB-Exos bekannt (1079 min). Für die 6-TB-Platten am PBS liest das Tool den Wert selbst aus.
+- Unterstützen die Platten selektive Selbsttests? Ausgabe von `smartctl -c /dev/sda` auf `pve` und `pbs`, Zeile
+  „Selective Self-test supported“. Ohne das lässt sich ein Langtest nicht über mehrere Tage aufteilen.
+- Wie kommt der LXC auf `router` an die anderen Hosts? Gleiche LAN-Adresse wie die Weboberfläche, SSH-Schlüssel auf `pve`, `pbs` und `router`.
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
