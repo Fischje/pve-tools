@@ -134,7 +134,13 @@ Das Tool beantwortet ohnehin nur Anfragen aus dem lokalen Netz.
 ## 5. Sichern und aktualisieren
 
 - Der Ordner `data/` enthält Datenbank, Schlüssel und Hostliste. Der LXC sollte im normalen Proxmox-Backup sein.
-- Aktualisieren: `cd /opt/pve-disk-tool && git pull && npm test && systemctl restart pve-disk-tool`.
+- **Aktualisieren:** `/opt/pve-disk-tool/update.sh` (im LXC als root). Das Skript holt die neue Version, lässt die Tests laufen, sichert die
+  Datenbank nach `data/vor-update-…` (die letzten 5 bleiben), startet den Dienst neu und prüft, ob er antwortet. Schlägt ein Schritt fehl, geht es
+  automatisch auf die vorherige Version zurück. Es ändert nichts, wenn schon alles aktuell ist, und bricht bei lokalen Änderungen im Programmordner ab.
+  Einstellungen, Passwort, Hostliste und Verlauf liegen in `data/` und bleiben unberührt.
+- **Mit Docker:** `cd /opt/pve-disk-tool && git pull && docker compose up -d --build`.
+- **Zugang auf den Hosts erneuern:** Nur nötig, wenn in den Hinweisen zu einer neuen Version steht, dass sich `host-setup/gate.sh` geändert hat.
+  Dann im Reiter „Hosts“ bei jedem Host „Neu einrichten“ wählen. Sonst bleibt der Zugang unverändert gültig.
 
 ## Demo ohne echte Hosts
 
