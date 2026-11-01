@@ -1,0 +1,13 @@
+{
+  "name": "pve-disk-tool",
+  "version": "0.1.0",
+  "description": "LAN-Dashboard für Festplattengesundheit von Proxmox VE und Proxmox Backup Server",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "demo": "DEMO=1 DATA_DIR=./data-demo node --disable-warning=ExperimentalWarning src/server.js",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+data/
+data-demo/
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+id_ed25519*
+id_rsa*
+*.sqlite
+*.db
