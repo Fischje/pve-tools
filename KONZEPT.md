@@ -71,7 +71,9 @@ Die Platte führt den Test selbst aus. Das Tool stößt ihn nur an und liest sp�
 | Kurztest-Intervall | alle 1 Monat | Anzahl Monate (1–12) |
 | Langtest-Intervall | alle 3 Monate | Anzahl Monate (1–12), empfohlen 3–4 |
 | Gesperrte Wochentage | Montag | Mehrfachauswahl. Gilt für Kurz- **und** Langtests. Fällt ein Termin darauf, rutscht er auf den nächsten erlaubten Tag |
-| Betriebsfenster des Hosts | 07:00 – 22:00 | Wann der Server läuft. Tests dürfen nur in diesem Fenster laufen |
+| Host-Art | PVE: „fest“, PBS: „manuell“ | Siehe unten. „Fest“ = läuft nach festem Rhythmus. „Manuell“ = wird von Hand gestartet |
+| Betriebsfenster (nur „fest“) | PVE: 08:00 – 22:00 | Wann der Server in der Regel läuft. Tests nur in diesem Fenster |
+| Sperrzeit täglich | 19:00 – 01:00 (alle Hosts) | **Absolut tabu.** Dann läuft kein Test, auch nicht „Jetzt starten“. Darf über Mitternacht gehen, mehrere Sperrzeiten möglich |
 | Anlaufzeit nach dem Hochfahren | 20 Minuten | Wartezeit, bis nach dem Boot getestet wird (ZFS-Import, Dienste, Backups) |
 | Sicherheitsabstand vor Ende | 30 Minuten | So lange vor dem Herunterfahren wird kein Test mehr gestartet und ein laufender sauber beendet |
 | Reihenfolge | seriell | Immer nur **eine** Platte pro Host gleichzeitig, nacheinander |
@@ -116,18 +118,39 @@ Fährt der Server herunter, wird ein laufender Selbsttest abgebrochen (im Testpr
    Läuft der LXC auf einem Gerät, das durchläuft, während der Ziel-Host schläft, wird nur auf Erreichbarkeit
    des Hosts reagiert.
 
-#### Beispielrechnung (deine 12-TB-Exos)
+#### PBS: wird von Hand gestartet
 
-Die Platte nennt 1079 Minuten (≈ 18 Stunden) für einen Langtest. Bei Betriebsfenster 07:00–22:00
-bleiben nach 20 Minuten Anlaufzeit und 30 Minuten Sicherheitsabstand rund 14 Stunden Testzeit pro Tag.
+Der PBS läuft sonst nur montags für das Backup und wird zum Testen von Hand hochgefahren. Er hat also kein festes
+Betriebsfenster, und das Tool kann nicht wissen, wann er wieder ausgeht. Deshalb gilt für Hosts der Art „manuell“:
 
-- Pro Platte: 18 h ÷ 14 h ⇒ **2 Tage** (ein Abschnitt am ersten Tag, der Rest am zweiten).
-- Sechs HDDs nacheinander: 6 × 18 h = 108 h ⇒ **etwa 8 Testtage**, ohne gesperrte Wochentage (mit Montag gesperrt
-  sind es 9 Kalendertage). Bei 3 Monaten Intervall passt das gut, der Langtest ist nur gut eine Woche pro Quartal aktiv.
-- Die 1079 Minuten gelten für eine ruhende Platte. Läuft nebenher Last (Backups, VMs), wird der Test langsamer. Das
-  Tool misst die tatsächliche Geschwindigkeit pro Abschnitt und plant mit dem gemessenen Wert weiter.
-- Während eines Langtests ist die Platte etwas langsamer. Auf dem PBS fällt das bei laufendem Backup auf; deshalb sind
-  Sperrzeiten einstellbar.
+- **Montag ist gesperrt** (Standard), der Backup-Tag bleibt testfrei. Startest du den PBS montags, passiert nichts.
+- Am Rest der Woche startet nach dem Hochfahren **nichts sofort**: Das Tool erkennt, dass der PBS erreichbar ist,
+  wartet die Anlaufzeit ab und zeigt oben ein Banner: „PBS erreichbar – Test startet in 20 Minuten“ mit den Knöpfen
+  **„Jetzt“**, **„Heute nicht“** und **„Dauer festlegen“**. Wer den PBS nur für eine Wiederherstellung startet, klickt
+  „Heute nicht“.
+- **Sitzungsdauer:** Es gibt eine einstellbare Standard-Testdauer pro Sitzung (Standard 8 Stunden). Danach (oder zur
+  Sperrzeit) endet der Test sauber. Eine zweite Option „bis zum Herunterfahren“ gibt es bewusst nicht, weil das Tool
+  nicht erkennen kann, wann du abschaltest.
+- Die Oberfläche zeigt klar: **„Test läuft – PBS bitte erst nach dem Ende herunterfahren.“** Wird er trotzdem früher abgeschaltet,
+  gilt der laufende Abschnitt als unterbrochen (kein Fehler) und wird wiederholt.
+- Ein geteilter Langtest läuft dann über mehrere Sitzungen, wie bei fest laufenden Hosts über mehrere Tage.
+
+#### Beispielrechnung (deine 12-TB-Exos, auf dem PVE)
+
+Die Platte nennt 1079 Minuten (≈ 18 Stunden) für einen Langtest. Der Server läuft 08:00–22:00, getestet werden
+darf aber wegen der Sperrzeit nur bis 19:00. Nach 20 Minuten Anlaufzeit und 30 Minuten Sicherheitsabstand bleiben
+etwa **10 Stunden Testzeit pro Tag** (08:20 – 18:30).
+
+- Pro Platte: 18 h ÷ 10 h ⇒ **2 Tage**, aber knapp: 20 Stunden Fenster für 18 Stunden Test. Läuft nebenher Last, wird
+  es der dritte Tag.
+- Sechs HDDs nacheinander: 6 × 18 h = 108 h ⇒ **etwa 11 Testtage**. Mit gesperrtem Montag sind das gut **2 Kalenderwochen**.
+  Bei einem Langtest alle 3 Monate ist das tragbar, auch wenn er etwas lästig ist: Die Platten sind in dieser Zeit
+  etwas langsamer.
+- Die Abschnitte werden bewusst etwas kürzer geplant (ca. 10 % Reserve), denn **ein vom Fensterende abgebrochener Abschnitt
+  zählt nicht** und wird wiederholt. Um 19:00 wird spätestens per `smartctl -X` hart beendet.
+- Die 1079 Minuten gelten für eine ruhende Platte. Das Tool misst die tatsächliche Geschwindigkeit pro Abschnitt
+  und plant mit dem gemessenen Wert weiter.
+- **Der Kurztest** (wenige Minuten je Platte) ist kein Problem und passt in jede Lücke.
 
 #### Ergebnis und Anzeige
 
@@ -304,10 +327,12 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
   (Dann kann `smartctl -d …` nötig sein.)
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
-- Wann genau läuft der PVE-Host (Hochfahren/Herunterfahren) und wann der PBS? Laufen beide im gleichen Rhythmus?
-  Das sind die Voreinstellungen fürs Betriebsfenster.
-- Gibt es Sperrzeiten innerhalb des Fensters (z. B. Backup-Fenster auf dem PBS)?
-- Langtest-Dauer ist bekannt (Exos: 1079 min). Fehlt noch für die zweite Exos-Variante (ST12000NM0248) und die
-  Lexar-NVMe; das Tool liest den Wert ohnehin selbst aus.
-- Wird der Server automatisch heruntergefahren (Zeitplan im BIOS/Skript) oder von Hand?
+- Welche Platten hängen am PVE, welche am PBS? (Die sechs 12-TB-Exos und die Lexar-NVMe: auf welchem Host?)
+- Der PBS wird von Hand gestartet: Reicht das Banner mit „Heute nicht“, oder soll ein PBS-Test immer erst nach einem
+  ausdrücklichen Klick starten (sicherer, aber mehr Handarbeit)?
+- Läuft der LXC mit dem Tool auf dem PVE? Dann ist er nachts aus, und der PBS kann nur getestet werden, wenn der PVE ebenfalls läuft.
+- Reicht eine Sitzungsdauer von 8 Stunden beim PBS als Standard?
+- Langtest-Dauer ist bekannt (Exos: 1079 min); es fehlen die zweite Exos-Variante (ST12000NM0248) und die Lexar-NVMe.
+  Das Tool liest den Wert ohnehin selbst aus.
+- Unterstützt die Exos selektive Selbsttests? (Ausgabe von `smartctl -c /dev/sda`, Zeile „Selective Self-test supported“.)
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
