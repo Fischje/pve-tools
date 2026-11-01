@@ -59,6 +59,38 @@ SMART-Endpunkt). Vermutlich weniger Details und bei NVMe nur Text. Vor einer Ent
 zu prüfen. Von der Gerätedurchreichung in den LXC wird abgeraten (Eingriff in die Host-Konfiguration,
 bindet an Gerätenamen wie `/dev/sdc`).
 
+### Zeitplan für Selbsttests
+
+Der Zeitplan läuft im Tool (im LXC), nicht als Cronjob auf dem Host. Der Host bleibt unverändert.
+Die Platte führt den Test selbst aus. Das Tool stößt ihn nur an und liest später das Ergebnis.
+Fällt der LXC zwischendurch aus, läuft ein begonnener Test trotzdem zu Ende.
+
+Voreinstellung (pro Host und pro Plattentyp änderbar):
+
+| Test | Standard | Hinweis |
+|------|----------|---------|
+| Kurztest | wöchentlich, Sonntag 03:00 | Minuten, kaum Last. Alle Platten eines Hosts nacheinander |
+| Langtest | monatlich, rollierend | **Eine Platte nach der anderen** pro Host, nicht alle zugleich |
+
+Regeln, damit der Zeitplan nichts kaputt macht:
+
+- **Rollierender Langtest:** Große HDDs (z. B. 12 TB) brauchen für einen Langtest viele Stunden.
+  Das Tool startet pro Host immer nur einen Langtest. Die nächste Platte folgt erst, wenn der
+  vorherige Test fertig ist. Die Reihenfolge wird so verteilt, dass jede Platte innerhalb des Monats
+  einmal drankommt. Verschiedene Hosts (PVE und PBS) dürfen parallel laufen.
+- **Rücksicht auf Last:** Ein Test wird verschoben, wenn auf dem Host gerade ein ZFS-Scrub oder
+  Resilver läuft oder schon ein Selbsttest auf der Platte läuft. Er holt den Termin im nächsten Zeitfenster nach.
+  Sperrzeiten (z. B. Backup-Fenster auf dem PBS) lassen sich einstellen.
+- **Nachholen:** War der Host zum Termin nicht erreichbar, wird der Test beim nächsten
+  erfolgreichen Abruf nachgeholt, aber nur innerhalb des erlaubten Zeitfensters.
+- **Schlafende HDDs:** Ein geplanter Test weckt die Platte bewusst auf. Das ist gewollt und
+  wird in der Oberfläche vermerkt.
+- **Ergebnis zählt in die Bewertung:** Ein fehlgeschlagener Test (z. B. „read failure“) lässt die Stufe
+  auf mindestens „Bald tauschen“ steigen. Ein zu lange zurückliegender erfolgreicher Test wird als Hinweis
+  angezeigt („letzter Langtest vor 94 Tagen“).
+- **Anzeige:** In der Tests-Ansicht steht pro Platte der nächste geplante Termin. Der Zeitplan kann
+  pro Platte oder Host pausiert werden. „Jetzt starten“ per Knopf bleibt zusätzlich möglich.
+
 ### Docker im LXC
 
 Gewählt ist Node/Docker. In einem unprivilegierten LXC läuft Docker nur mit den Optionen
@@ -105,8 +137,8 @@ Beim Übernehmen fallen folgende Schwächen auf, die dann behoben sind:
 Das ist ein fremdes Skript (Luis R. Rodriguez, ISC-Lizenz), das per `setpci` PCIe-Register
 ändert, um Stromsparen (ASPM) zu erzwingen. Es hat mit Plattengesundheit nichts zu tun, schreibt
 direkt in die Hardware-Konfiguration des Hosts (nach einem Neustart wieder weg) und passt weder
-zu „Host bleibt unberührt“ noch in eine Weboberfläche. Es bleibt außen vor. Wenn du willst,
-kann ich es getrennt als Notiz oder Anleitung für den Host festhalten. Die hochgeladene Datei
+zu „Host bleibt unberührt“ noch in eine Weboberfläche. Es bleibt außen vor. Das ist ein eigenes
+Projekt für später. Die hochgeladene Datei
 war außerdem eine als HTML gespeicherte GitHub-Seite und kein reines Skript.
 
 ## Bewertung
@@ -223,7 +255,6 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
   (Dann kann `smartctl -d …` nötig sein.)
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
-- Selbsttests starten ist gesetzt (wie `disk_test.sh`). Fragen dazu: Sollen Tests auch nach Zeitplan laufen
-  (z. B. Kurztest wöchentlich, Langtest monatlich), oder weiter nur per Knopfdruck?
-- Soll `enable-aspm.sh` getrennt dokumentiert werden (siehe oben)?
+- Selbsttests starten ist gesetzt (per Knopf wie `disk_test.sh` und nach Zeitplan). Zu klären: Gibt es
+  Zeiten, in denen nicht getestet werden darf (z. B. Backup-Fenster auf dem PBS)?
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
