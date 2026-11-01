@@ -71,8 +71,8 @@ Die Platte führt den Test selbst aus. Das Tool stößt ihn nur an und liest sp�
 | Kurztest-Intervall | alle 1 Monat | Anzahl Monate (1–12) |
 | Langtest-Intervall | alle 3 Monate | Anzahl Monate (1–12), empfohlen 3–4 |
 | Gesperrte Wochentage | Montag | Mehrfachauswahl. Gilt für Kurz- **und** Langtests. Fällt ein Termin darauf, rutscht er auf den nächsten erlaubten Tag |
-| Host-Art | PVE: „fest“, PBS: „manuell“ | Siehe unten. „Fest“ = läuft nach festem Rhythmus. „Manuell“ = wird von Hand gestartet |
-| Betriebsfenster (nur „fest“) | PVE: 08:00 – 22:00 | Wann der Server in der Regel läuft. Tests nur in diesem Fenster |
+| Host-Art | PVE: „fest“, PBS: „manueller Start“ | „Fest“ = Start und Ende nach festem Rhythmus. „Manueller Start“ = beliebiger Start, aber festes Tagesende |
+| Betriebsfenster | PVE: 08:00 – 22:00, PBS: Start offen, Ende 19:00 | Wann der Server läuft. Bei „manueller Start“ gibt es nur das feste Tagesende (hier schaltet sich der PBS selbst aus) |
 | Sperrzeit täglich | 19:00 – 01:00 (alle Hosts) | **Absolut tabu.** Dann läuft kein Test, auch nicht „Jetzt starten“. Darf über Mitternacht gehen, mehrere Sperrzeiten möglich |
 | Anlaufzeit nach dem Hochfahren | 20 Minuten | Wartezeit, bis nach dem Boot getestet wird (ZFS-Import, Dienste, Backups) |
 | Sicherheitsabstand vor Ende | 30 Minuten | So lange vor dem Herunterfahren wird kein Test mehr gestartet und ein laufender sauber beendet |
@@ -118,22 +118,24 @@ Fährt der Server herunter, wird ein laufender Selbsttest abgebrochen (im Testpr
    Läuft der LXC auf einem Gerät, das durchläuft, während der Ziel-Host schläft, wird nur auf Erreichbarkeit
    des Hosts reagiert.
 
-#### PBS: wird von Hand gestartet
+#### PBS: Start von Hand, festes Ende um 19:00
 
-Der PBS läuft sonst nur montags für das Backup und wird zum Testen von Hand hochgefahren. Er hat also kein festes
-Betriebsfenster, und das Tool kann nicht wissen, wann er wieder ausgeht. Deshalb gilt für Hosts der Art „manuell“:
+Der PBS wird montags um 07:50 vom Host hochgefahren. Nach einer Viertelstunde starten die Backup-Skripte auf den
+Hosts. An allen anderen Tagen startest du ihn von Hand zum Testen. Er schaltet sich **jeden Tag um 19:00 selbst aus**.
+Für Hosts der Art „manueller Start“ gilt:
 
-- **Montag ist gesperrt** (Standard), der Backup-Tag bleibt testfrei. Startest du den PBS montags, passiert nichts.
-- Am Rest der Woche startet nach dem Hochfahren **nichts sofort**: Das Tool erkennt, dass der PBS erreichbar ist,
-  wartet die Anlaufzeit ab und zeigt oben ein Banner: „PBS erreichbar – Test startet in 20 Minuten“ mit den Knöpfen
-  **„Jetzt“**, **„Heute nicht“** und **„Dauer festlegen“**. Wer den PBS nur für eine Wiederherstellung startet, klickt
-  „Heute nicht“.
-- **Sitzungsdauer:** Es gibt eine einstellbare Standard-Testdauer pro Sitzung (Standard 8 Stunden). Danach (oder zur
-  Sperrzeit) endet der Test sauber. Eine zweite Option „bis zum Herunterfahren“ gibt es bewusst nicht, weil das Tool
-  nicht erkennen kann, wann du abschaltest.
-- Die Oberfläche zeigt klar: **„Test läuft – PBS bitte erst nach dem Ende herunterfahren.“** Wird er trotzdem früher abgeschaltet,
-  gilt der laufende Abschnitt als unterbrochen (kein Fehler) und wird wiederholt.
-- Ein geteilter Langtest läuft dann über mehrere Sitzungen, wie bei fest laufenden Hosts über mehrere Tage.
+- **Montag ist gesperrt** (Standard): Backup-Tag, der PBS wird automatisch hochgefahren und es wird nie getestet.
+  Das Tool muss vom Backup nichts wissen, die Wochentagssperre genügt.
+- **Ende ist bekannt:** Das Tagesende (19:00) ist eingestellt, also läuft der Test bis zum Sicherheitsabstand davor
+  (18:30). Eine feste Sitzungsdauer ist nicht nötig. Wer den PBS um 14:00 startet, hat bis 18:30 Zeit, nach 08:00 bis 18:30.
+- **Start erst nach Freigabe:** Nach dem Hochfahren und der Anlaufzeit zeigt das Tool ein Banner: „PBS erreichbar –
+  Test startet in 20 Minuten“ mit **„Jetzt“**, **„Heute nicht“** und **„Später“**. So startet kein Test, wenn der PBS nur
+  für eine Wiederherstellung läuft. Das Banner ist einstellbar (Test startet automatisch / nur nach Klick).
+- Die Oberfläche zeigt: **„Test läuft – bitte den PBS nicht vorher abschalten.“** Wird er trotzdem früher
+  heruntergefahren, gilt der laufende Abschnitt als unterbrochen (kein Fehler) und wird wiederholt.
+- Ein geteilter Langtest läuft über mehrere Tage, wie auf dem PVE. Der Rest des Tages vor 18:30 wird genutzt, je nachdem,
+  wann du den PBS gestartet hast.
+- Dass der PBS um 19:00 ausgeht, passt zur Sperrzeit 19:00–01:00; beides fällt zusammen.
 
 #### Beispielrechnung (deine 12-TB-Exos, auf dem PVE)
 
@@ -328,10 +330,9 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
 - Welche Platten hängen am PVE, welche am PBS? (Die sechs 12-TB-Exos und die Lexar-NVMe: auf welchem Host?)
-- Der PBS wird von Hand gestartet: Reicht das Banner mit „Heute nicht“, oder soll ein PBS-Test immer erst nach einem
-  ausdrücklichen Klick starten (sicherer, aber mehr Handarbeit)?
+- Der PBS startet nur von Hand (außer montags): Soll sein Test nach dem Hochfahren automatisch starten (mit Banner und
+  „Heute nicht“), oder immer erst nach einem ausdrücklichen Klick?
 - Läuft der LXC mit dem Tool auf dem PVE? Dann ist er nachts aus, und der PBS kann nur getestet werden, wenn der PVE ebenfalls läuft.
-- Reicht eine Sitzungsdauer von 8 Stunden beim PBS als Standard?
 - Langtest-Dauer ist bekannt (Exos: 1079 min); es fehlen die zweite Exos-Variante (ST12000NM0248) und die Lexar-NVMe.
   Das Tool liest den Wert ohnehin selbst aus.
 - Unterstützt die Exos selektive Selbsttests? (Ausgabe von `smartctl -c /dev/sda`, Zeile „Selective Self-test supported“.)
