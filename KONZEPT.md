@@ -358,12 +358,11 @@ umgelagerten Sektoren und 11266 CRC-Fehlern als Testfall („Bald tauschen“ pl
 
 ## Offene Fragen
 
-- Wie viele Hosts sind es genau (ein PVE, ein PBS), und stehen Platten hinter einem HBA/RAID-Controller?
-  (Dann kann `smartctl -d …` nötig sein.)
+- Hängen Platten hinter einem HBA oder RAID-Controller? (Dann kann `smartctl -d …` nötig sein. Die Screenshots
+  zeigen echte Modellnamen, was für direkte Anbindung spricht.)
 - Reicht ein stündlicher Abfrageintervall?
 - Soll die Seite ein Passwort haben oder LAN-only genügen?
 - Langtest-Dauer ist für die 12-TB-Exos bekannt (1079 min). Für die 6-TB-Platten am PBS liest das Tool den Wert selbst aus.
 - Unterstützen die Platten selektive Selbsttests? Ausgabe von `smartctl -c /dev/sda` auf `pve` und `pbs`, Zeile
   „Selective Self-test supported“. Ohne das lässt sich ein Langtest nicht über mehrere Tage aufteilen.
-- Wie kommt der LXC auf `router` an die anderen Hosts? Gleiche LAN-Adresse wie die Weboberfläche, SSH-Schlüssel auf `pve`, `pbs` und `router`.
 - Bisherige Skripte aus dem ChatGPT-Verlauf im Palast bleiben dort als Notiz; hier wird neu begonnen.
