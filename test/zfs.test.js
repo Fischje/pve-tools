@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseZpoolStatus, parseZpoolList, ratePool, parseScan } from '../src/zfs.js';
+import { parseZpoolStatus, parseZpoolList, ratePool, parseScan, normalizePool } from '../src/zfs.js';
 
 const STATUS = `  pool: tank
  state: ONLINE
@@ -96,4 +96,13 @@ test('Bewertung: gesunder Pool, Fehlerzähler, defekter Pool, voller Pool, alter
   assert.equal(ratePool({ ...clean, cap: 93 }, now).level, 'replace');
   assert.equal(ratePool(clean, new Date(2027, 2, 1)).level, 'watch'); // Scrub vom Oktober, jetzt März
   assert.equal(ratePool({ ...clean, errors: '2 data errors, use \'-v\' for a list' }, now).level, 'critical');
+});
+
+test('Pools älterer Versionen und kaputte Einträge werden angeglichen statt abzustürzen', () => {
+  const n = normalizePool({ name: 'x', state: 'ONLINE', scan: 'none requested' });
+  assert.deepEqual(n.vdevs, []);
+  assert.equal(n.scan.state, 'none');
+  assert.equal(ratePool({ name: 'x', state: 'DEGRADED' }, new Date()).level, 'critical');
+  assert.doesNotThrow(() => ratePool({}, new Date()));
+  assert.doesNotThrow(() => ratePool({ name: 'y', vdevs: [{ name: 'mirror-0', type: 'mirror' }] }, new Date()));
 });

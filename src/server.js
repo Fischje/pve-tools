@@ -223,6 +223,8 @@ async function main() {
 
   let running = false;
   const tick = async () => { if (running) return; running = true; try { await engine.tick(); } finally { running = false; } };
+  // Nach jedem Start (auch nach einem Update) einmal alle Hosts abfragen, damit die Oberfläche sofort frische Daten hat.
+  if (!demo) (async () => { for (const h of hosts) { try { await engine.pollHost(h.id); } catch (e) { log(`Erste Abfrage von ${h.id} fehlgeschlagen: ${e.message}`); } } })();
   setTimeout(tick, 1000);
   setInterval(tick, tickMs);
   setInterval(() => db.prune(now()), 24 * 3600 * 1000);

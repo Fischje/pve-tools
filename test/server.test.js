@@ -240,3 +240,21 @@ test('Mail-API: ohne Oberflächen-Passwort gesperrt, Passwort wird nie ausgegebe
   assert.equal((await call('GET', '/api/mail')).json.passwordSet, false);
   close();
 });
+
+test('Update-Schutz: Pools im Format einer älteren Version (ohne vdev-Baum) bringen die Übersicht nicht zum Absturz', async () => {
+  const { call, close, db, engine } = await boot();
+  const old = { name: 'tank', state: 'ONLINE', scan: 'scrub repaired 0B in 05:10:12 with 0 errors on Sun Oct 11 05:34:13 2026', errors: 'No known data errors', busy: false, level: 'ok', findings: [] };
+  const hs = db.getHostState('pve');
+  db.setHostState('pve', { ...hs, pools: [old] });
+  const o = await call('GET', '/api/overview');
+  assert.equal(o.status, 200, JSON.stringify(o.json));
+  const tank = o.json.hosts.find((h) => h.id === 'pve').pools[0];
+  assert.deepEqual(tank.vdevs, []);
+  assert.equal(tank.scan.state, 'finished', 'der alte Scrub-Text wird weiterhin ausgewertet');
+  assert.equal((await call('GET', '/api/stats')).status, 200);
+  assert.equal((await call('GET', '/api/tests')).status, 200);
+  // ... und die nächste Abfrage ersetzt sie durch die neue Form
+  await engine.pollHost('pve');
+  assert.ok(db.getHostState('pve').pools.find((p) => p.name === 'tank').vdevs.length > 0);
+  close();
+});

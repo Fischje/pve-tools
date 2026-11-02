@@ -52,7 +52,7 @@ export function annotatePool(pool, disks) {
     return disks.find((d) => d.device === `/dev/${base}`) ?? null;
   };
   const tag = (dev) => { const d = find(dev.name); return d ? { ...dev, serial: d.serial, diskLabel: `${d.model} (${d.device})`, diskLevel: d.level } : dev; };
-  return { ...pool, vdevs: pool.vdevs.map((v) => ({ ...tag(v), devices: v.devices.map(tag) })) };
+  return { ...pool, vdevs: (pool.vdevs ?? []).map((v) => ({ ...tag(v), devices: (v.devices ?? []).map(tag) })) };
 }
 
 function bannerFor(host, s, st, hs, now) {

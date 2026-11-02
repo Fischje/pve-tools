@@ -90,10 +90,25 @@ export function parseZpoolList(text) {
   return out;
 }
 
+/**
+ * Pools, die eine ältere Version in der Datenbank gespeichert hat, haben weder vdev-Baum noch strukturierten Scrub-Status.
+ * Ohne diese Angleichung bricht die Übersicht nach einem Update ab, bis der Host das nächste Mal abgefragt wurde.
+ */
+export function normalizePool(p) {
+  const raw = p ?? {};
+  const scanText = raw.scanText ?? (typeof raw.scan === 'string' ? raw.scan : raw.scan?.text ?? '');
+  return {
+    ...raw, name: raw.name ?? '?', state: raw.state ?? 'UNKNOWN', errors: raw.errors ?? '', status: raw.status ?? '', action: raw.action ?? '',
+    vdevs: Array.isArray(raw.vdevs) ? raw.vdevs.map((v) => ({ ...v, devices: Array.isArray(v.devices) ? v.devices : [] })) : [],
+    scanText, scan: raw.scan && typeof raw.scan === 'object' ? raw.scan : parseScan(scanText), busy: !!raw.busy,
+  };
+}
+
 const worstOf = (levels) => levels.reduce((a, b) => (LEVEL_ORDER.indexOf(b) > LEVEL_ORDER.indexOf(a) ? b : a), 'ok');
 
 /** Bewertung eines Pools samt vdevs. now: Date */
-export function ratePool(p, now = new Date()) {
+export function ratePool(p0, now = new Date()) {
+  const p = normalizePool(p0);
   const f = [];
   const add = (level, code, title, text, advice = '') => f.push({ level, code, title, text, advice });
   if (BAD_STATES.has(p.state)) add('critical', 'pool-state', `Pool ${p.name}: ${p.state}`, p.status || 'Der Speicherpool ist nicht mehr voll redundant oder nicht verfügbar.', p.action || 'Betroffene Platte mit `zpool status` ermitteln und ersetzen. Backup prüfen.');

@@ -2,6 +2,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
+import { normalizePool } from './zfs.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -50,7 +51,7 @@ export function openDb(dir) {
 
     getHostState: (id) => {
       const r = q('SELECT * FROM host_state WHERE host_id=?').get(id);
-      return r ? { lastPoll: d(r.last_poll), reachable: !!r.reachable, uptimeSec: r.uptime_sec, uptimeAt: d(r.uptime_at), pools: r.pools ? JSON.parse(r.pools) : [], error: r.error, gateVersion: r.gate_version } : null;
+      return r ? { lastPoll: d(r.last_poll), reachable: !!r.reachable, uptimeSec: r.uptime_sec, uptimeAt: d(r.uptime_at), pools: r.pools ? JSON.parse(r.pools).map(normalizePool) : [], error: r.error, gateVersion: r.gate_version } : null;
     },
     setHostState: (id, s) => q(`INSERT INTO host_state(host_id,last_poll,reachable,uptime_sec,uptime_at,pools,error,gate_version) VALUES(?,?,?,?,?,?,?,?)
       ON CONFLICT(host_id) DO UPDATE SET last_poll=excluded.last_poll,reachable=excluded.reachable,uptime_sec=excluded.uptime_sec,uptime_at=excluded.uptime_at,pools=excluded.pools,error=excluded.error,gate_version=excluded.gate_version`)
