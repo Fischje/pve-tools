@@ -12,6 +12,13 @@ export class HostClient {
     return v;
   }
 
+  /** Version des Prüfskripts auf dem Host. Ältere Skripte kennen den Befehl nicht: dann Version 1. */
+  async gateVersion() {
+    const r = await this.t.run('version', 15000);
+    const v = Number.parseInt(r.stdout, 10);
+    return r.code === 0 && Number.isInteger(v) ? v : 1;
+  }
+
   async listDisks() {
     const r = await this.t.run('list', 15000);
     if (r.code !== 0) throw new Error(r.stderr.trim() || 'lsblk fehlgeschlagen');

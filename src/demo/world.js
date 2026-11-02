@@ -1,5 +1,6 @@
 // Simulierte Hosts für den Demo-Modus und die Tests: antwortet wie das Gate-Skript, mit Beispieldaten und simulierten Tests.
 import * as fx from './fixtures.js';
+import { EXPECTED_GATE_VERSION } from '../gate-version.js';
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 function as(json, device, serial, model, capBytes) {
@@ -122,6 +123,7 @@ export class DemoTransport {
     const a = command.split(' ');
     const ok = (o) => ({ code: 0, stdout: typeof o === 'string' ? o : JSON.stringify(o), stderr: '' });
     switch (a[0]) {
+      case 'version': return ok(String(this.id === 'pbs' ? EXPECTED_GATE_VERSION - 1 : EXPECTED_GATE_VERSION)); // pbs ist in der Demo absichtlich veraltet
       case 'uptime': return ok(String((w.clock().getTime() - st.bootAt) / 1000));
       case 'list': return ok({ blockdevices: [...st.disks.values()].map((d) => ({ name: d.json.device.name.slice(5), type: 'disk', model: d.json.model_name, serial: d.json.serial_number, size: d.json.user_capacity.bytes, rota: d.json.rotation_rate > 0, tran: d.json.device.protocol === 'NVMe' ? 'nvme' : 'sata' })) });
       case 'zpool': { const h = w.hosts.find((x) => x.id === this.id); const t = zpoolStatusText(h.pools); return ok(st.scrub ? t.replace(/scrub repaired[^\n]*/, 'scrub in progress since Tue Nov  3 10:00:00 2026\n\t1.20T scanned at 1.0G/s, 400G issued at 500M/s, 3.00T total\n\t10.00% done, 05:00:00 to go') : t); }

@@ -12,6 +12,7 @@ import { Provisioner, buildRemoteScript, shq, writeHostsFile } from '../src/prov
 const openApps = [];
 after(() => { for (const a of openApps) { a.closeAllConnections?.(); a.close(); } });
 import { createApp } from '../src/server.js';
+import { EXPECTED_GATE_VERSION } from '../src/gate-version.js';
 
 const PUB = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPubkeyPubkeyPubkeyPubkeyPubkeyPubkey diskmon@pve-disk-tool';
 const FP = `SHA256:${'A'.repeat(43)}`;
@@ -55,11 +56,14 @@ function setup({ ssh, resolve, makeClientFails = false } = {}) {
     if (cmd === 'ssh') return ssh ? ssh(args, o) : { code: 0, stdout: 'Fertig.', stderr: '' };
     throw new Error(`unerwartet: ${cmd}`);
   };
-  const client = { uptime: async () => 100, listDisks: async () => [{ device: '/dev/sda' }], zpool: async () => [], smart: async () => { throw new Error('egal'); } };
+  const gate = { version: EXPECTED_GATE_VERSION };
+  const client = { gateVersion: async () => gate.version, uptime: async () => 100, listDisks: async () => [{ device: '/dev/sda' }], zpool: async () => [], smart: async () => { throw new Error('egal'); } };
   const engine = new Engine({ db: openDb(null), hosts: [], makeClient: () => { if (makeClientFails) return { uptime: async () => { throw new Error('Permission denied'); } }; return client; } });
   const persisted = [];
   const prov = new Provisioner({ engine, dataDir, repoDir: path.resolve('.'), persist: async (h) => { persisted.push(JSON.parse(JSON.stringify(h))); }, runner, resolve: resolve ?? (async (a) => (a.startsWith('192.168.') ? [a] : ['8.8.8.8'])), tmp });
-  return { prov, engine, calls, persisted, dataDir, tmp };
+  const known = { pinned: true };
+  prov.runner = async (cmd, args, o) => (cmd === 'ssh-keygen' && args[0] === '-F' ? { code: known.pinned ? 0 : 1, stdout: known.pinned ? 'x ssh-ed25519 AAAA' : '', stderr: '' } : runner(cmd, args, o));
+  return { prov, engine, calls, persisted, dataDir, tmp, gate, known };
 }
 const req = (o = {}) => ({ id: 'pve', label: 'pve', address: '192.168.1.11', port: 22, kind: 'fest', window: { from: '08:00', to: '22:00' }, password: PW, fingerprint: FP, ...o });
 
@@ -192,4 +196,35 @@ test('Server: im Demo-Modus nicht verfügbar, öffentliche Adressen abgelehnt, F
   for (let i = 0; i < 4; i++) await call('POST', '/api/setup/fingerprint', { address: 'example.com' });
   assert.equal((await call('POST', '/api/setup/fingerprint', { address: '192.168.1.11' })).status, 429);
   close();
+});
+
+test('Aktualisieren: nur Passwort nötig, Fingerabdruck stammt von der Einrichtung', async () => {
+  const { prov, calls, gate } = setup();
+  await prov.run(req());
+  gate.version = EXPECTED_GATE_VERSION;
+  const r = await prov.run({ hostId: 'pve', action: 'update', password: PW });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.updated, true);
+  const ssh = calls.filter((c) => c.cmd === 'ssh').at(-1);
+  assert.ok(ssh.args.includes('StrictHostKeyChecking=yes'));
+  assert.doesNotMatch(ssh.input, /bash "\$T\/setup-host\.sh" --entfernen/);
+  assert.match(ssh.input, /bash "\$T\/setup-host\.sh" 'ssh-ed25519/);
+  assert.ok(!JSON.stringify(r).includes(PW));
+});
+
+test('Aktualisieren: ohne gespeicherten Fingerabdruck oder unbekannten Host abgelehnt', async () => {
+  const { prov, known } = setup();
+  await prov.run(req());
+  known.pinned = false;
+  await assert.rejects(prov.run({ hostId: 'pve', action: 'update', password: PW }), /Fingerabdruck gespeichert/);
+  await assert.rejects(prov.run({ action: 'update', password: PW }), /bekannt/);
+});
+
+test('Aktualisieren: meldet der Host danach noch die alte Version, ist das ein Fehler', async () => {
+  const { prov, gate } = setup();
+  await prov.run(req());
+  gate.version = 1;
+  const r = await prov.run({ hostId: 'pve', action: 'update', password: PW });
+  assert.equal(r.ok, false);
+  assert.match(r.error, /Version 1/);
 });

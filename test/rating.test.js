@@ -124,3 +124,11 @@ test('Hinweis, wenn der letzte Langtest lange zurückliegt', () => {
   const res = r(fx.wdSsd86());
   assert.ok(codes(res).includes('long-old'));
 });
+
+test('ein später abgebrochener Test überdeckt einen früheren Fehlschlag nicht', () => {
+  const j = fx.exos12();
+  j.ata_smart_self_test_log.standard.table = [fx.ataLogEntry('extended', 2, 11990), fx.ataLogEntry('extended', 7, 11000), fx.ataLogEntry('extended', 0, 8000)];
+  const res = r(j);
+  assert.equal(res.level, 'replace');
+  assert.ok(codes(res).includes('test-failed'));
+});

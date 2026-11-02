@@ -98,7 +98,8 @@ function rateNvme(disk, add, rose) {
 
 function rateSelfTests(disk, add, longHintDays, f) {
   const log = disk.selftest.log; // neuester zuerst
-  const tests = log.filter((e) => e.result !== 'running' && e.result !== 'other');
+  // Nur Tests mit Urteil zählen. Ein abgebrochener Test sagt nichts über die Platte und darf einen früheren Fehlschlag nicht überdecken.
+  const tests = log.filter((e) => e.result === 'ok' || e.result === 'failed');
   const newest = (kind) => tests.find((e) => e.kind === kind);
   for (const kind of ['short', 'extended', 'selective']) {
     const t = newest(kind);

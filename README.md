@@ -13,6 +13,8 @@ bleibt der Kern unberührt: dort liegen nur ein eingeschränkter SSH-Zugang und 
 - **Host-Seite:** gruppiertes Menü mit Hosts, Pools und Platten. Je Host: Zustand der Platten, ZFS-Pools mit vdev-Baum (Fehlerzähler, Zuordnung der Geräte zu Platten, Scrub, Füllstand), laufende und alle Tests des Hosts.
 - **Verlauf:** Messwerte in SQLite, damit sichtbar wird, ob ein Fehlerwert noch steigt.
 - **Hosts aus der Oberfläche einrichten:** Assistent, der den eingeschränkten Zugang auf dem Host anlegt (einmalig mit dem root-Passwort, das nicht gespeichert wird). Kein Zugriff auf die Befehlszeile des Hosts nötig.
+- **E-Mail-Benachrichtigung:** eine Mail pro Änderung, wenn eine Platte „Bald tauschen“/„Kritisch“ wird, ein ZFS-Pool Fehler meldet oder ein Selbsttest fehlschlägt (eigener SMTP-Client, STARTTLS und SSL/TLS, ohne Abhängigkeiten).
+- **Prüfskript auf den Hosts aktualisieren:** Die Oberfläche zeigt veraltete Hosts und aktualisiert sie per Klick (einmalig mit dem root-Passwort).
 - **Passwort in der Oberfläche** setzbar. Erreichbar nur aus dem lokalen Netz.
 - **Automatisch aktuell:** Push auf `claude/**` -> Tests und Secret-Scan -> Merge nach `main` -> der LXC holt `main` alle 5 Minuten (mit Tests, Sicherung und Rückfall).
 - Läuft ohne externe Abhängigkeiten (Node 22).
@@ -35,6 +37,7 @@ npm run demo        # Demo mit simulierten Hosts
 | `src/engine.js` | Abfragen, Testergebnisse verbuchen, Tests starten und abbrechen |
 | `src/stats.js`, `src/zfs.js` | Statistik-Berechnung, ZFS-Auswertung (Pools, vdevs, Scrub) |
 | `src/server.js`, `src/auth.js`, `src/service.js` | Webserver, Passwort, Aufbereitung für die Oberfläche |
+| `src/smtp.js`, `src/notify.js` | Mailversand und die Regeln, wann eine Mail kommt |
 | `src/provision.js` | Einrichtung eines Hosts aus der Oberfläche (Fingerabdruck, Passwort einmalig, Prüfung) |
 | `web/` | Oberfläche (reines JavaScript, kein Build-Schritt): `app.js` (Rahmen), `stats-view.js`, `host-view.js`, `tests-view.js`, `charts.js` (SVG-Diagramme) |
 | `host-setup/` | Prüfskript und Einrichtung für die Proxmox-Hosts |

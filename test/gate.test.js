@@ -27,6 +27,7 @@ test('erlaubte Befehle', () => {
   assert.equal(run('test /dev/sda abort').out, 'smartctl -j -X /dev/sda');
   assert.equal(run('select /dev/sda 0 1000').out, 'smartctl -j -t select,0-1000 /dev/sda');
   assert.match(run('uptime').out, /^[0-9.]+$/);
+  assert.match(run('version').out, /^\d+$/);
   assert.equal(run('zpool').out, 'zpool status -p');
   assert.equal(run('zpoollist').out, 'zpool list -H -p -o name,size,alloc,free,frag,cap,health');
 });
@@ -38,7 +39,7 @@ test('abgelehnt: Partition, Loop-Gerät, unbekanntes Gerät, Pfad-Tricks', () =>
 });
 
 test('abgelehnt: Shell-Zeichen, falsche Argumente, unbekannte Befehle', () => {
-  for (const c of ['', 'list; id', 'list && id', 'smart /dev/sda $(id)', 'smart /dev/sda `id`', 'test /dev/sda format', 'test /dev/sda', 'select /dev/sda 10 5', 'select /dev/sda a b', 'select /dev/sda 0 99999999999999', 'bash', 'cat /etc/shadow', 'list extra', 'zpoollist -v', 'zpool destroy tank', 'smart /dev/sda wake', 'test /dev/sda short -d scsi']) {
+  for (const c of ['', 'list; id', 'list && id', 'smart /dev/sda $(id)', 'smart /dev/sda `id`', 'test /dev/sda format', 'test /dev/sda', 'select /dev/sda 10 5', 'select /dev/sda a b', 'select /dev/sda 0 99999999999999', 'bash', 'cat /etc/shadow', 'list extra', 'version 2', 'zpoollist -v', 'zpool destroy tank', 'smart /dev/sda wake', 'test /dev/sda short -d scsi']) {
     assert.equal(run(c).code, 64, `"${c}"`);
   }
 });

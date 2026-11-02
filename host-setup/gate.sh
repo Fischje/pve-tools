@@ -7,6 +7,7 @@
 # Installation: host-setup/setup-host.sh kopiert diese Datei nach /etc/diskmon/gate.sh (gehört root).
 #
 # Erlaubte Befehle:
+#   version                      Version dieses Prüfskripts
 #   list                         Platten auflisten (lsblk, JSON)
 #   uptime                       Sekunden seit dem Hochfahren
 #   zpool                        zpool status (falls ZFS vorhanden)
@@ -15,6 +16,9 @@
 #   test <dev> short|long|abort  Selbsttest starten bzw. abbrechen
 #   select <dev> <von> <bis>     Selektiver Selbsttest über einen Sektorbereich (nur Zahlen)
 set -euo pipefail
+
+# Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
+GATE_VERSION=3
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
@@ -33,6 +37,9 @@ dev_ok() {
 num_ok() { [[ "$1" =~ ^[0-9]{1,13}$ ]] || fail "keine Zahl: $1"; }
 
 case "${a[0]}" in
+  version)
+    [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
+    echo "$GATE_VERSION" ;;
   list)
     [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
     exec lsblk -J -d -b -o NAME,TYPE,MODEL,SERIAL,SIZE,ROTA,TRAN ;;

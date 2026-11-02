@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS testrun (id INTEGER PRIMARY KEY AUTOINCREMENT, serial
 CREATE INDEX IF NOT EXISTS testrun_serial ON testrun (serial, started);
 CREATE TABLE IF NOT EXISTS long_progress (serial TEXT PRIMARY KEY, next_lba INTEGER, total_lba INTEGER, lba_per_min REAL, segments INTEGER, started INTEGER);
 CREATE TABLE IF NOT EXISTS approval (host_id TEXT PRIMARY KEY, skip_date TEXT, snooze_until INTEGER, go_at INTEGER);
+CREATE TABLE IF NOT EXISTS alert_state (key TEXT PRIMARY KEY, level TEXT, alerted TEXT, updated INTEGER);
 CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, host_id TEXT, serial TEXT, text TEXT NOT NULL);
 `;
 
@@ -30,6 +31,8 @@ export function openDb(dir) {
   db.exec(SCHEMA);
   // Migrationen für bestehende Datenbanken (Spalten, die in späteren Versionen dazukamen).
   const cols = db.prepare('PRAGMA table_info(testrun)').all().map((c) => c.name);
+  const hostCols = db.prepare('PRAGMA table_info(host_state)').all().map((c) => c.name);
+  if (!hostCols.includes('gate_version')) db.exec('ALTER TABLE host_state ADD COLUMN gate_version INTEGER');
   if (!cols.includes('planned_minutes')) db.exec('ALTER TABLE testrun ADD COLUMN planned_minutes INTEGER');
   if (!cols.includes('completes_long')) db.exec('ALTER TABLE testrun ADD COLUMN completes_long INTEGER DEFAULT 0');
   const q = (sql) => db.prepare(sql);
@@ -47,11 +50,11 @@ export function openDb(dir) {
 
     getHostState: (id) => {
       const r = q('SELECT * FROM host_state WHERE host_id=?').get(id);
-      return r ? { lastPoll: d(r.last_poll), reachable: !!r.reachable, uptimeSec: r.uptime_sec, uptimeAt: d(r.uptime_at), pools: r.pools ? JSON.parse(r.pools) : [], error: r.error } : null;
+      return r ? { lastPoll: d(r.last_poll), reachable: !!r.reachable, uptimeSec: r.uptime_sec, uptimeAt: d(r.uptime_at), pools: r.pools ? JSON.parse(r.pools) : [], error: r.error, gateVersion: r.gate_version } : null;
     },
-    setHostState: (id, s) => q(`INSERT INTO host_state(host_id,last_poll,reachable,uptime_sec,uptime_at,pools,error) VALUES(?,?,?,?,?,?,?)
-      ON CONFLICT(host_id) DO UPDATE SET last_poll=excluded.last_poll,reachable=excluded.reachable,uptime_sec=excluded.uptime_sec,uptime_at=excluded.uptime_at,pools=excluded.pools,error=excluded.error`)
-      .run(id, ms(s.lastPoll), s.reachable ? 1 : 0, s.uptimeSec ?? null, ms(s.uptimeAt), JSON.stringify(s.pools ?? []), s.error ?? null),
+    setHostState: (id, s) => q(`INSERT INTO host_state(host_id,last_poll,reachable,uptime_sec,uptime_at,pools,error,gate_version) VALUES(?,?,?,?,?,?,?,?)
+      ON CONFLICT(host_id) DO UPDATE SET last_poll=excluded.last_poll,reachable=excluded.reachable,uptime_sec=excluded.uptime_sec,uptime_at=excluded.uptime_at,pools=excluded.pools,error=excluded.error,gate_version=excluded.gate_version`)
+      .run(id, ms(s.lastPoll), s.reachable ? 1 : 0, s.uptimeSec ?? null, ms(s.uptimeAt), JSON.stringify(s.pools ?? []), s.error ?? null, s.gateVersion ?? null),
 
     upsertDisk(hostId, disk, now, raw) {
       const st = disk.selftest;
@@ -106,6 +109,9 @@ export function openDb(dir) {
     setApproval: (hostId, a) => q('INSERT INTO approval(host_id,skip_date,snooze_until,go_at) VALUES(?,?,?,?) ON CONFLICT(host_id) DO UPDATE SET skip_date=excluded.skip_date,snooze_until=excluded.snooze_until,go_at=excluded.go_at')
       .run(hostId, a.skipDate ?? null, ms(a.snoozeUntil), ms(a.goAt)),
 
+    getAlert: (key) => q('SELECT level, alerted, updated FROM alert_state WHERE key=?').get(key) ?? null,
+    setAlert: (key, level, alerted, ts) => q('INSERT INTO alert_state(key,level,alerted,updated) VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET level=excluded.level,alerted=excluded.alerted,updated=excluded.updated').run(key, level, alerted, ms(ts)),
+    clearAlerts: () => q('DELETE FROM alert_state').run(),
     addEvent: (ts, hostId, serial, text) => q('INSERT INTO event(ts,host_id,serial,text) VALUES(?,?,?,?)').run(ms(ts), hostId ?? null, serial ?? null, text),
     events: (limit = 100) => q('SELECT * FROM event ORDER BY id DESC LIMIT ?').all(limit),
     close: () => db.close(),

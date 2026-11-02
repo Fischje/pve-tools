@@ -148,3 +148,30 @@ test('NVMe-Langtest im Demo wird richtig verbucht (kein „unterbrochen“)', as
   assert.equal(db.runsOfDisk(nv.serial)[0].result, 'ok');
   assert.ok(db.getDisk(nv.serial).last_long_ok);
 });
+
+test('Abfragerhythmus: einstellbar, Host aus wird seltener gefragt, laufender Test enger', async () => {
+  const { engine, db, world, advance } = setup(new Date(2026, 10, 3, 9, 0));
+  assert.deepEqual(engine.pollingSettings(), { idleMinutes: 30, offlineMinutes: 30, runningMinutes: 5 });
+  db.setSetting('polling', JSON.stringify({ idleMinutes: 60, offlineMinutes: 45, runningMinutes: 10 }));
+  assert.equal(engine.pollingSettings().idleMinutes, 60);
+  db.setSetting('polling', JSON.stringify({ idleMinutes: 1, offlineMinutes: 9999, runningMinutes: 'x' }));
+  assert.deepEqual(engine.pollingSettings(), { idleMinutes: 5, offlineMinutes: 240, runningMinutes: 5 }, 'ungültige Werte werden begrenzt');
+  db.setSetting('polling', JSON.stringify({ idleMinutes: 60, offlineMinutes: 45, runningMinutes: 10 }));
+  for (const h of world.hosts) db.setHostSettings(h.id, { enabled: false }); // keine Tests, nur Abfragen zählen
+  let polls = 0; const orig = engine.pollHost.bind(engine); engine.pollHost = async (id) => { if (id === 'router') polls++; return orig(id); };
+  await engine.tickHost('router'); assert.equal(polls, 1);
+  advance(30); await engine.tickHost('router'); assert.equal(polls, 1, 'nach 30 min noch nicht (Normalbetrieb 60)');
+  advance(31); await engine.tickHost('router'); assert.equal(polls, 2);
+  world.setUp('router', false);
+  advance(61); await engine.tickHost('router'); assert.equal(polls, 3);
+  advance(30); await engine.tickHost('router'); assert.equal(polls, 3, 'ausgeschalteter Host: 45 min');
+  advance(16); await engine.tickHost('router'); assert.equal(polls, 4);
+});
+
+test('Skript-Version des Hosts wird gespeichert', async () => {
+  const { engine, db } = setup();
+  const { EXPECTED_GATE_VERSION } = await import('../src/gate-version.js');
+  await engine.pollHost('pve'); await engine.pollHost('pbs');
+  assert.equal(db.getHostState('pve').gateVersion, EXPECTED_GATE_VERSION);
+  assert.equal(db.getHostState('pbs').gateVersion, EXPECTED_GATE_VERSION - 1);
+});

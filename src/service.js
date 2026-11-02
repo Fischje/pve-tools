@@ -3,6 +3,7 @@ import { rate, LEVEL_LABEL, LEVEL_ORDER } from './rating.js';
 import { testWindow, nextPlanned, blockedIntervals, dayAllowed, dayKey, DEFAULT_SETTINGS } from './schedule.js';
 import { ratePool } from './zfs.js';
 import { summarize } from './stats.js';
+import { EXPECTED_GATE_VERSION } from './gate-version.js';
 
 const iso = (d) => (d ? new Date(d).toISOString() : null);
 
@@ -101,6 +102,7 @@ export function overview(engine) {
       lastPoll: iso(hs?.lastPoll), uptimeSec: st.uptimeSec, pools,
       window: { open: win.open, reason: win.reason, softEnd: iso(win.softEnd), minutesLeft: win.minutesLeft },
       hostSummary: { reachable: !!hs?.reachable },
+      gate: { version: hs?.gateVersion ?? null, expected: EXPECTED_GATE_VERSION, outdated: !!hs?.reachable && hs?.gateVersion != null && hs.gateVersion < EXPECTED_GATE_VERSION },
       decision: dec ? { action: dec.action, reason: dec.reason } : null,
       banner: bannerFor(host, s, st, hs, now),
       disks,
@@ -114,6 +116,8 @@ export function overview(engine) {
     now: iso(now), summary: { text: summary, level: worst }, hosts,
     events: db.events(50).map((e) => ({ ts: iso(e.ts), hostId: e.host_id, serial: e.serial, text: e.text })),
     defaults: DEFAULT_SETTINGS,
+    polling: engine.pollingSettings(),
+    mail: engine.notifier?.publicConfig() ?? null,
   };
 }
 

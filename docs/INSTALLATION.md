@@ -159,7 +159,20 @@ Ausschalten: `./install-sync.sh --entfernen`.
 Voraussetzung auf GitHub: Unter *Settings → Actions → General → Workflow permissions* muss „Read and write permissions“ gewählt sein,
 und `main` sollte als Standardzweig eingestellt sein.
 
-## 6. Sichern und aktualisieren
+## 6. Abfragerhythmus und E-Mail
+
+Beides stellst du in der Oberfläche unter „Zeitplan & Konto“ ein.
+
+**Abfragerhythmus:** Im Normalbetrieb fragt das Tool jeden Host alle 30 Minuten, einen ausgeschalteten oder nicht erreichbaren Host ebenfalls alle 30 Minuten und während eines Tests alle 5 Minuten. Alle drei Werte lassen sich ändern. Das SMART-Lesen weckt schlafende Platten nicht. Ein langer Abstand heißt: Ein Host, der gerade hochgefahren wurde, wird erst bei der nächsten Abfrage bemerkt, ein Test startet dann entsprechend später.
+
+**E-Mail-Benachrichtigung:** Trage Mailserver, Port, Verschlüsselung (STARTTLS oder SSL/TLS), Benutzer, Passwort, Absender und Empfänger ein, schicke eine Testmail und schalte die Benachrichtigung ein. Das Mail-Passwort liegt in der Datenbank unter `data/` auf dem LXC (nie im Git) und wird nie wieder angezeigt. Für die Einstellung muss ein Passwort für die Oberfläche gesetzt sein. Es kommt eine Mail, wenn
+- eine Platte auf „Bald tauschen“ oder „Kritisch“ wechselt,
+- ein ZFS-Pool einen Fehler meldet (Pool nicht mehr voll in Ordnung, neuer Fehlerzähler an einem Gerät, Datenfehler, Pool fast voll),
+- ein Selbsttest fehlschlägt (ein abgebrochener Test zählt nicht).
+
+Jede Mail kommt nur einmal pro Änderung. Optional gibt es eine Entwarnung, wenn wieder alles in Ordnung ist. Beim Einschalten werden bereits bestehende Probleme still übernommen, gemeldet wird nur, was danach neu passiert. „Zusammenfassung jetzt senden“ schickt den aktuellen Stand. Ist der Mailserver nicht erreichbar, versucht das Tool es bei der nächsten Abfrage erneut und schreibt den Fehler höchstens einmal pro Stunde ins Ereignisprotokoll (Reiter „Tests“).
+
+## 7. Sichern und aktualisieren
 
 - Der Ordner `data/` enthält Datenbank, Schlüssel und Hostliste. Der LXC sollte im normalen Proxmox-Backup sein.
 - **Von Hand aktualisieren:** `/opt/pve-disk-tool/update.sh` (im LXC als root). Mit dem automatischen Abgleich (Abschnitt 5) ist das nur noch nötig, wenn du nicht bis zum nächsten Lauf warten willst. Das Skript holt die neue Version, lässt die Tests laufen, sichert die
@@ -167,7 +180,7 @@ und `main` sollte als Standardzweig eingestellt sein.
   automatisch auf die vorherige Version zurück. Es ändert nichts, wenn schon alles aktuell ist, und bricht bei lokalen Änderungen im Programmordner ab.
   Einstellungen, Passwort, Hostliste und Verlauf liegen in `data/` und bleiben unberührt.
 - **Mit Docker:** `cd /opt/pve-disk-tool && git pull && docker compose up -d --build`.
-- **Neue Prüfskript-Version:** Die ZFS-Füllstände (Größe, belegt, frei) kommen über den Befehl `zpoollist` im Prüfskript auf dem Host. Hosts, die vor dieser Version eingerichtet wurden, kennen ihn noch nicht. Die Pools erscheinen dann ohne Füllstand, und die Host-Seite weist darauf hin. Dann im Reiter „Hosts einrichten“ bei dem Host „Neu einrichten“ wählen.
+- **Neue Prüfskript-Version:** Das Prüfskript auf den Hosts hat eine Versionsnummer. Ist sie älter als die im Tool, steht auf der Startseite ein Hinweis und im Reiter „Hosts einrichten“ bei dem Host „veraltet“. Ein Klick auf „Skript aktualisieren“ spielt es neu auf. Dafür gibst du das root-Passwort des Hosts kurz ein (wird nicht gespeichert). Der Fingerabdruck von der Einrichtung wird wieder verwendet. Bis dahin funktioniert alles Bisherige weiter, nur neue Funktionen (z. B. der Füllstand der ZFS-Pools) fehlen auf diesem Host.
 - **Zugang auf den Hosts erneuern:** Nur nötig, wenn in den Hinweisen zu einer neuen Version steht, dass sich `host-setup/gate.sh` geändert hat.
   Dann im Reiter „Hosts“ bei jedem Host „Neu einrichten“ wählen. Sonst bleibt der Zugang unverändert gültig.
 

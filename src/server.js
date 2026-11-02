@@ -12,6 +12,7 @@ import { SshTransport } from './transport.js';
 import { overview, diskDetail, cleanSettings, statsOverview, testsList } from './service.js';
 import { isPrivateIp } from './net.js';
 import { Provisioner, writeHostsFile } from './provision.js';
+import { Notifier, cleanMail } from './notify.js';
 
 export { isPrivateIp };
 
@@ -19,7 +20,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'web');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
-export function createApp({ db, engine, auth, allowPublic = false, provisioner = null }) {
+export function createApp({ db, engine, auth, allowPublic = false, provisioner = null, notifier = engine.notifier ?? null }) {
   const send = (res, status, body, headers = {}) => {
     const isStr = typeof body === 'string';
     res.writeHead(status, { 'Content-Type': isStr ? 'text/plain; charset=utf-8' : 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
@@ -79,6 +80,33 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       return send(res, 404, { error: 'Nicht gefunden' });
     }
     if (route === 'GET /api/overview') return send(res, 200, overview(engine));
+    if (url.pathname.startsWith('/api/mail')) {
+      if (!notifier) return send(res, 400, { error: 'E-Mail ist nicht verfügbar.' });
+      if (route === 'GET /api/mail') return send(res, 200, notifier.publicConfig());
+      if (!auth.hasPassword()) return send(res, 403, { error: 'Bitte zuerst unter „Zeitplan & Konto“ ein Passwort für diese Oberfläche setzen. Hier wird ein Mail-Passwort gespeichert.' });
+      const key = `mail:${ip}`;
+      if (auth.tooMany(key)) return send(res, 429, { error: 'Zu viele Versuche. Bitte in 10 Minuten erneut versuchen.' });
+      try {
+        if (route === 'PUT /api/mail') {
+          const b = await readBody(req);
+          if (b.password != null && (typeof b.password !== 'string' || b.password.length > 256)) throw new Error('Passwort: ungültig'); // gitleaks:allow (Fehlermeldung, kein Geheimnis)
+          notifier.save(cleanMail(b), { password: b.password || undefined, clearPassword: !!b.clearPassword });
+          return send(res, 200, notifier.publicConfig());
+        }
+        if (route === 'POST /api/mail/test') { await notifier.sendTest(); return send(res, 200, { ok: true }); }
+        if (route === 'POST /api/mail/digest') { await notifier.sendDigest(); return send(res, 200, { ok: true }); }
+      } catch (e) { auth.noteFail(key); return send(res, route === 'PUT /api/mail' ? 400 : 502, { error: e.message }); }
+      return send(res, 404, { error: 'Nicht gefunden' });
+    }
+    if (route === 'GET /api/settings/polling') return send(res, 200, engine.pollingSettings());
+    if (route === 'PUT /api/settings/polling') {
+      const b = await readBody(req);
+      const num = (v, lo, hi, name) => { const x = Number(v); if (!Number.isInteger(x) || x < lo || x > hi) throw new Error(`${name}: erlaubt sind ${lo} bis ${hi} Minuten`); return x; };
+      try {
+        db.setSetting('polling', JSON.stringify({ idleMinutes: num(b.idleMinutes, 5, 240, 'Normalbetrieb'), offlineMinutes: num(b.offlineMinutes, 5, 240, 'Host aus'), runningMinutes: num(b.runningMinutes, 2, 30, 'Test läuft') }));
+      } catch (e) { return send(res, 400, { error: e.message }); }
+      return send(res, 200, engine.pollingSettings());
+    }
     if (route === 'GET /api/stats') return send(res, 200, statsOverview(engine));
     if (route === 'GET /api/tests') {
       const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit')) || 300));
@@ -185,6 +213,8 @@ async function main() {
     seedDemo(db, hosts, now());
   }
   const auth = new Auth(db);
+  // Im Demo-Modus werden nie echte Mails verschickt.
+  engine.notifier = new Notifier({ db, engine, send: demo ? async () => { throw new Error('Im Demo-Modus werden keine Mails verschickt.'); } : undefined });
   const hostsFile = path.join(dataDir, 'hosts.json');
   const provisioner = demo ? null : new Provisioner({ engine, dataDir, repoDir: ROOT, persist: (list) => writeHostsFile(hostsFile, list) });
   const app = createApp({ db, engine, auth, allowPublic: env.ALLOW_PUBLIC === '1', provisioner });

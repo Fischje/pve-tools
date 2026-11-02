@@ -31,6 +31,13 @@ export class Engine {
   host(id) { const h = this.hosts.find((x) => x.id === id); if (!h) throw new Error(`Unbekannter Host: ${id}`); return h; }
   client(id) { if (!this.clients.has(id)) this.clients.set(id, this.makeClient(this.host(id))); return this.clients.get(id); }
   settings(id) { return { ...defaultsForHost(this.host(id)), ...(this.db.getHostSettings(id) ?? {}) }; }
+  /** Abfragerhythmus in Minuten (einstellbar). Läuft ein Test: eng, damit das Ende zeitnah verbucht wird. */
+  pollingSettings() {
+    let s = {}; try { s = JSON.parse(this.db.getSetting('polling') ?? '{}'); } catch { /* Standard */ }
+    const n = (v, d, lo, hi) => { const x = Number(v); return Number.isInteger(x) ? Math.max(lo, Math.min(hi, x)) : d; };
+    return { idleMinutes: n(s.idleMinutes, 30, 5, 240), offlineMinutes: n(s.offlineMinutes, 30, 5, 240), runningMinutes: n(s.runningMinutes, 5, 2, 30) };
+  }
+
   event(hostId, serial, text) { this.db.addEvent(this.now(), hostId, serial, text); this.log(`[${hostId}] ${text}`); }
 
   /** Eine Abfrage eines Hosts: Laufzeit, Platten, SMART, Testergebnisse, ZFS. */
@@ -40,11 +47,12 @@ export class Engine {
     const prev = this.db.getHostState(hostId);
     let uptime;
     try { uptime = await client.uptime(); } catch (e) {
-      this.db.setHostState(hostId, { lastPoll: now, reachable: false, uptimeSec: null, uptimeAt: null, pools: prev?.pools ?? [], error: e.message });
+      this.db.setHostState(hostId, { lastPoll: now, reachable: false, uptimeSec: null, uptimeAt: null, pools: prev?.pools ?? [], error: e.message, gateVersion: prev?.gateVersion });
       if (prev?.reachable) this.event(hostId, null, `Host nicht mehr erreichbar (${e.message})`);
       return;
     }
     if (prev && !prev.reachable) this.event(hostId, null, 'Host ist wieder erreichbar');
+    const gateVersion = await client.gateVersion().catch(() => prev?.gateVersion ?? null);
     let pools = prev?.pools ?? [];
     try {
       const list = await client.zpoolList().catch(() => ({}));
@@ -71,7 +79,8 @@ export class Engine {
         }
       } catch (e) { this.event(hostId, null, `${dev.device}: ${e.message}`); }
     }
-    this.db.setHostState(hostId, { lastPoll: now, reachable: true, uptimeSec: uptime, uptimeAt: now, pools, error: null });
+    this.db.setHostState(hostId, { lastPoll: now, reachable: true, uptimeSec: uptime, uptimeAt: now, pools, error: null, gateVersion });
+    try { await this.notifier?.evaluateHost(hostId); } catch (e) { this.log(`Benachrichtigung fehlgeschlagen: ${e.message}`); }
   }
 
   /** Läuft ein von uns gestarteter Test nicht mehr? Dann Ergebnis aus dem Testprotokoll lesen und verbuchen. */
@@ -91,6 +100,7 @@ export class Engine {
       const name = `${disk.model} (${disk.device})`;
       if (result === 'interrupted') { this.event(hostId, disk.serial, `${label} ${name} wurde unterbrochen und wird wiederholt.`); continue; }
       this.event(hostId, disk.serial, `${label} ${name}: ${result === 'ok' ? 'ohne Fehler beendet' : `FEHLER – ${note}`}`);
+      if (result === 'failed') this.notifier?.testFailed({ hostId, runId: run.id, disk, note, kind: run.kind }).catch(() => {});
       if (run.kind === 'short') this.db.setLastOk(disk.serial, 'short', now);
       else if (run.kind === 'long' || result === 'failed') { this.db.setLastOk(disk.serial, 'long', now); this.db.clearProgress(disk.serial); this.db.markCompletesLong(run.id); }
       else {
@@ -144,7 +154,8 @@ export class Engine {
     const s = this.settings(hostId);
     let hs = this.db.getHostState(hostId);
     let state = this.buildState(hostId, now);
-    const interval = (state.disks.some((d) => d.running) || !hs?.reachable) ? 5 : 30;
+    const pl = this.pollingSettings();
+    const interval = state.disks.some((d) => d.running) ? pl.runningMinutes : !hs?.reachable ? pl.offlineMinutes : pl.idleMinutes;
     if (!hs?.lastPoll || now - hs.lastPoll >= interval * MIN) { await this.pollHost(hostId); hs = this.db.getHostState(hostId); state = this.buildState(hostId, now); }
     let dec = decide(now, s, state);
     if (dec.action !== 'none' && now - hs.lastPoll > 3 * MIN) { await this.pollHost(hostId); state = this.buildState(hostId, now); dec = decide(now, s, state); }

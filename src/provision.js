@@ -14,6 +14,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import path from 'node:path';
 import { isPrivateIp } from './net.js';
+import { EXPECTED_GATE_VERSION } from './gate-version.js';
 
 const ADDRESS_RE = /^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$|^[0-9a-fA-F:]+$/;
 const KEY_RE = /^ssh-(ed25519|rsa) [A-Za-z0-9+/=]+( [A-Za-z0-9@._-]*)?$/;
@@ -125,12 +126,13 @@ export class Provisioner {
 
   /** Schritt 2: einrichten oder Zugang entfernen. */
   async run(req) {
-    const action = req.action === 'remove' ? 'remove' : 'install';
+    const action = req.action === 'remove' ? 'remove' : req.action === 'update' ? 'update' : 'install';
     const existing = req.hostId ? this.engine.hosts.find((h) => h.id === req.hostId) : null;
     if (req.hostId && !existing) throw new Error('Host unbekannt.');
     const password = String(req.password ?? '');
     if (!password || password.length > 256) throw new Error('Bitte das root-Passwort des Hosts eingeben.');
-    if (!FP_RE.test(String(req.fingerprint ?? ''))) throw new Error('Bitte zuerst den Fingerabdruck des Hosts prüfen und bestätigen.');
+    if (action === 'update' && !existing) throw new Error('Zum Aktualisieren muss der Host bekannt sein.');
+    if (action !== 'update' && !FP_RE.test(String(req.fingerprint ?? ''))) throw new Error('Bitte zuerst den Fingerabdruck des Hosts prüfen und bestätigen.');
 
     let host;
     if (existing) host = existing;
@@ -147,11 +149,17 @@ export class Provisioner {
     const target = await this.checkTarget({ address: existing?.address ?? req.address, port: existing?.port ?? req.port });
     host = { ...host, address: target.address, port: target.port };
 
-    await this.pin(target.address, target.port, req.fingerprint);
+    if (action === 'update') {
+      // Aktualisieren geht nur gegen den bei der Einrichtung bestätigten Fingerabdruck.
+      const spec = target.port === 22 ? target.address : `[${target.address}]:${target.port}`;
+      const known = await this.runner('ssh-keygen', ['-F', spec, '-f', this.knownHosts], { timeoutMs: 10000 });
+      if (known.code !== 0 || !known.stdout.trim()) throw new Error('Für diesen Host ist noch kein Fingerabdruck gespeichert. Bitte „Neu einrichten“ verwenden.');
+    } else await this.pin(target.address, target.port, req.fingerprint);
     const publicKey = await this.publicKey();
     const gate = await readFile(path.join(this.repoDir, 'host-setup', 'gate.sh'), 'utf8');
     const setup = await readFile(path.join(this.repoDir, 'host-setup', 'setup-host.sh'), 'utf8');
-    const script = buildRemoteScript({ gate, setup, publicKey, action, bindIp: req.bindIp !== false, installPackages: !!req.installPackages });
+    const bindIp = action === 'update' ? existing.bindIp !== false : req.bindIp !== false;
+    const script = buildRemoteScript({ gate, setup, publicKey, action: action === 'remove' ? 'remove' : 'install', bindIp, installPackages: !!req.installPackages });
 
     const dir = await mkdtemp(path.join(this.tmp, 'disktool-'));
     let res;
@@ -173,13 +181,19 @@ export class Provisioner {
     }
 
     // Prüfen, ob der neue, eingeschränkte Zugang funktioniert.
-    let disks;
-    try { const c = this.engine.makeClient(host); await c.uptime(); disks = (await c.listDisks()).length; } catch (e) {
+    let disks, version = null;
+    try {
+      const c = this.engine.makeClient(host); await c.uptime(); disks = (await c.listDisks()).length;
+      if (typeof c.gateVersion === 'function') version = await c.gateVersion();
+    } catch (e) {
       return { ok: false, log, error: `Die Einrichtung lief durch, aber die Verbindung mit dem neuen Schlüssel schlägt fehl: ${e.message}. Meist stimmt die Quell-IP nicht (Haken „Schlüssel an die IP dieses Tools binden“ abschalten und erneut versuchen).` };
     }
-    if (!existing) await this.addHost(host);
+    if (version != null && version < EXPECTED_GATE_VERSION) {
+      return { ok: false, log, error: `Das Skript wurde installiert, der Host meldet aber noch Version ${version} (erwartet: ${EXPECTED_GATE_VERSION}). Bitte erneut versuchen und die Ausgabe prüfen.` };
+    }
+    if (!existing) await this.addHost({ ...host, bindIp });
     this.engine.pollHost(host.id).catch(() => {});
-    return { ok: true, log, host: { id: host.id, label: host.label }, disks };
+    return { ok: true, log, host: { id: host.id, label: host.label }, disks, version, updated: action === 'update' };
   }
 
   explain(log) {

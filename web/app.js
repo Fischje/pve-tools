@@ -76,9 +76,15 @@ function hostSection(host) {
     host.disks.length ? h('div', { class: 'grid' }, host.disks.map((d) => diskCard(host, d))) : h('p', { class: 'empty' }, host.reachable ? 'Noch keine Platten gelesen.' : 'Keine Daten, solange der Host nicht erreichbar ist. Das ist normal, wenn er ausgeschaltet ist.'));
 }
 
+function outdatedBanner(host) {
+  const g = host.gate;
+  return h('div', { class: 'banner warn' }, h('div', {}, h('b', {}, `Das Prüfskript auf ${host.label} ist veraltet (Version ${g.version}, aktuell ${g.expected}).`), h('div', { class: 'sub' }, 'Neuere Funktionen, zum Beispiel der Füllstand der ZFS-Pools, fehlen dort noch. Das Aktualisieren dauert wenige Sekunden.')),
+    h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => { view = 'hosts'; wizard = { mode: 'update', host, step: 1 }; render(); window.scrollTo(0, 0); } }, 'Jetzt aktualisieren')));
+}
+
 function viewOverview() {
   if (!data.hosts.length) return h('p', { class: 'empty' }, 'Keine Hosts eingerichtet. Öffne den Reiter „Hosts einrichten“.');
-  return [data.hosts.map(bannerEl),
+  return [data.hosts.filter((x) => x.gate?.outdated).map(outdatedBanner), data.hosts.map(bannerEl),
     stats ? [globalStats(stats, data), hostStatsSection(stats, data)] : null,
     h('div', { class: 'sec-title' }, h('h2', {}, 'Alle Platten')), data.hosts.map(hostSection)];
 }
@@ -150,7 +156,52 @@ function accountPanel() {
     h('div', { class: 'row' }, h('button', { class: 'primary', onclick: () => set(false) }, authState.passwordSet ? 'Passwort ändern' : 'Passwort setzen'), authState.passwordSet ? h('button', { class: 'danger', onclick: () => confirm('Passwortschutz wirklich entfernen?') && set(true) }, 'Schutz entfernen') : null,
       authState.passwordSet ? h('button', { onclick: async () => { await api('POST', '/api/auth/logout', {}); authState.loggedIn = false; render(); } }, 'Abmelden') : null, msg));
 }
-const viewSettings = () => [data.hosts.map(hostSettingsForm), accountPanel()];
+function pollingPanel() {
+  const p = data.polling ?? { idleMinutes: 30, offlineMinutes: 30, runningMinutes: 5 };
+  const f = {};
+  const num = (key, label, lo, hi, hint) => { f[key] = h('input', { type: 'number', min: lo, max: hi, value: p[key] }); return h('label', { class: 'f' }, `${label} (Minuten, ${lo}–${hi})`, f[key], h('span', { class: 'sub' }, hint)); };
+  const msg = h('span', {});
+  return h('section', { class: 'panel' }, h('h2', {}, 'Abfragerhythmus'),
+    h('p', { class: 'sub' }, 'Wie oft das Tool die Hosts nach dem Zustand der Platten fragt. Das SMART-Lesen weckt schlafende Platten nicht. Eine seltene Abfrage entlastet die Hosts, dafür fallen Probleme und gestartete Hosts später auf.'),
+    h('div', { class: 'form-grid' }, num('idleMinutes', 'Normalbetrieb', 5, 240, 'Host läuft, kein Test aktiv'), num('offlineMinutes', 'Host aus oder nicht erreichbar', 5, 240, 'Ein später gestarteter Host wird erst bei der nächsten Abfrage bemerkt'), num('runningMinutes', 'Während ein Test läuft', 2, 30, 'Damit das Ende zeitnah verbucht wird')),
+    h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => { try { await api('PUT', '/api/settings/polling', { idleMinutes: f.idleMinutes.value, offlineMinutes: f.offlineMinutes.value, runningMinutes: f.runningMinutes.value }); msg.className = 'okmsg'; msg.textContent = 'Gespeichert.'; await load(false); } catch (e) { msg.className = 'error'; msg.textContent = e.message; } } }, 'Speichern'), msg));
+}
+
+function mailPanel() {
+  const m = data.mail ?? { config: { notify: {} }, passwordSet: false };
+  const c = m.config, n = c.notify ?? {};
+  const f = {
+    enabled: h('input', { type: 'checkbox', checked: c.enabled }), host: h('input', { type: 'text', value: c.host, placeholder: 'mail.example.org' }), port: h('input', { type: 'number', min: 1, max: 65535, value: c.port }),
+    security: h('select', {}, [['starttls', 'STARTTLS (meist Port 587)'], ['ssl', 'SSL/TLS (meist Port 465)'], ['none', 'keine (nur ohne Anmeldung, nicht empfohlen)']].map(([v, t]) => h('option', { value: v, selected: c.security === v }, t))),
+    user: h('input', { type: 'text', value: c.user, autocomplete: 'off' }), pw: h('input', { type: 'password', autocomplete: 'new-password', placeholder: m.passwordSet ? 'gespeichert (leer lassen = unverändert)' : '' }),
+    from: h('input', { type: 'text', value: c.from, placeholder: 'platten@example.org' }), to: h('input', { type: 'text', value: c.to, placeholder: 'du@example.org' }), baseUrl: h('input', { type: 'text', value: c.baseUrl, placeholder: `http://${location.host}` }),
+    cert: h('input', { type: 'checkbox', checked: c.rejectUnauthorized === false }),
+    disk: h('input', { type: 'checkbox', checked: n.disk !== false }), pool: h('input', { type: 'checkbox', checked: n.pool !== false }), test: h('input', { type: 'checkbox', checked: n.test !== false }), recovery: h('input', { type: 'checkbox', checked: n.recovery !== false }),
+  };
+  const msg = h('p', { role: 'status' });
+  const say = (ok, t) => { msg.className = ok ? 'okmsg' : 'error'; msg.textContent = t; };
+  const body = () => ({ enabled: f.enabled.checked, host: f.host.value.trim(), port: Number(f.port.value), security: f.security.value, user: f.user.value.trim(), password: f.pw.value || undefined, from: f.from.value.trim(), to: f.to.value.trim(), baseUrl: f.baseUrl.value.trim(),
+    rejectUnauthorized: !f.cert.checked, notify: { disk: f.disk.checked, pool: f.pool.checked, test: f.test.checked, recovery: f.recovery.checked } });
+  const save = async () => { await api('PUT', '/api/mail', body()); f.pw.value = ''; await load(false); };
+  const run = (fn, okText) => async () => { try { await save(); await fn(); say(true, okText); } catch (e) { say(false, e.message); } };
+  return h('section', { class: 'panel' }, h('h2', {}, 'E-Mail-Benachrichtigung'),
+    !authState.passwordSet ? h('p', { class: 'error' }, 'Setze zuerst unten ein Passwort für diese Oberfläche. Das Mail-Passwort wird auf dem LXC gespeichert und soll nicht für jeden im Netz zugänglich sein.') : null,
+    h('p', { class: 'sub' }, 'Es kommt eine Mail pro Änderung, keine Wiederholung bei jeder Abfrage. Beim Einschalten werden bereits bekannte Probleme still übernommen, gemeldet wird nur, was danach neu passiert. Mit „Zusammenfassung jetzt senden“ bekommst du den aktuellen Stand per Mail.'),
+    h('label', {}, f.enabled, ' Benachrichtigung per E-Mail einschalten'),
+    h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'Mailserver', f.host), h('label', { class: 'f' }, 'Port', f.port), h('label', { class: 'f' }, 'Verschlüsselung', f.security),
+      h('label', { class: 'f' }, 'Benutzer (leer = ohne Anmeldung)', f.user), h('label', { class: 'f' }, 'Passwort', f.pw), h('label', { class: 'f' }, 'Absender', f.from),
+      h('label', { class: 'f' }, 'Empfänger (mehrere mit Komma, höchstens 5)', f.to), h('label', { class: 'f' }, 'Adresse dieser Oberfläche (für den Link in der Mail, optional)', f.baseUrl)),
+    h('label', {}, f.cert, ' Zertifikat des Mailservers nicht prüfen (nur bei selbstsigniertem Zertifikat im eigenen Netz)'),
+    h('div', { class: 'f' }, h('span', {}, 'Wann soll eine Mail kommen?'), h('div', { class: 'checks' },
+      h('label', {}, f.disk, ' Platte wird „Bald tauschen“ oder „Kritisch“'), h('label', {}, f.pool, ' ZFS-Pool-Fehler'), h('label', {}, f.test, ' Selbsttest fehlgeschlagen'), h('label', {}, f.recovery, ' Entwarnung, wenn wieder alles in Ordnung ist'))),
+    msg,
+    h('div', { class: 'row' }, h('button', { class: 'primary', onclick: run(async () => {}, 'Gespeichert.') }, 'Speichern'),
+      h('button', { onclick: run(() => api('POST', '/api/mail/test', {}), 'Testmail wurde gesendet. Bitte Posteingang prüfen.') }, 'Speichern und Testmail senden'),
+      h('button', { onclick: run(() => api('POST', '/api/mail/digest', {}), 'Zusammenfassung wurde gesendet.') }, 'Zusammenfassung jetzt senden'),
+      m.passwordSet ? h('button', { class: 'danger', onclick: async () => { try { await api('PUT', '/api/mail', { clearPassword: true }); await load(false); say(true, 'Mail-Passwort gelöscht.'); } catch (e) { say(false, e.message); } } }, 'Gespeichertes Passwort löschen') : null));
+}
+
+const viewSettings = () => [data.hosts.map(hostSettingsForm), pollingPanel(), mailPanel(), accountPanel()];
 
 
 // ---------- Ansicht: Hosts einrichten ----------
@@ -162,18 +213,40 @@ function hostsTable() {
     h('td', {}, `${host.address ?? '–'}${host.port && host.port !== 22 ? `:${host.port}` : ''}`),
     h('td', {}, { dauer: 'immer an', fest: 'fester Rhythmus', manuell: 'Start von Hand' }[host.kind] ?? host.kind),
     h('td', {}, host.reachable ? '✔ erreichbar' : '✖ nicht erreichbar'),
+    h('td', {}, host.gate?.version == null ? h('span', { class: 'sub' }, host.reachable ? 'unbekannt' : '–') : h('span', {}, `v${host.gate.version}`, ' ', h('span', { class: `pill ${host.gate.outdated ? 'watch' : 'ok'}` }, host.gate.outdated ? `veraltet (aktuell v${host.gate.expected})` : 'aktuell'))),
     h('td', {}, h('div', { class: 'row' },
+      h('button', { class: host.gate?.outdated ? 'primary' : '', disabled: !host.reachable, title: host.reachable ? '' : 'Der Host ist nicht erreichbar', onclick: () => { wizard = { mode: 'update', host, step: 1 }; render(); } }, 'Skript aktualisieren'),
       h('button', { onclick: () => { wizard = { mode: 'redo', host, step: 1 }; render(); } }, 'Neu einrichten'),
       h('button', { onclick: () => { wizard = { mode: 'remove', host, step: 1 }; render(); } }, 'Zugang entfernen'),
       h('button', { class: 'danger', onclick: () => confirm(`„${host.label}“ aus der Liste löschen?\nDer Zugang auf dem Host bleibt bestehen (vorher „Zugang entfernen“ wählen).`) && act(() => api('DELETE', `/api/hosts/${encodeURIComponent(host.id)}`), 'Host gelöscht.') }, 'Aus Liste löschen')))));
-  return data.hosts.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Host', 'Adresse', 'Art', 'Status', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Noch kein Host eingerichtet.');
+  return data.hosts.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Host', 'Adresse', 'Art', 'Status', 'Prüfskript', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Noch kein Host eingerichtet.');
 }
 
 
+function updatePanel(w) {
+  const pw = h('input', { type: 'password', autocomplete: 'off' }); const msg = h('p', { class: 'error', role: 'alert' });
+  const g = w.host.gate ?? {};
+  const btn = h('button', { class: 'primary', onclick: async () => {
+    msg.textContent = '';
+    if (!pw.value) { msg.textContent = 'Bitte das root-Passwort des Hosts eingeben.'; return; }
+    btn.disabled = true; btn.textContent = 'Läuft …';
+    const body = { action: 'update', hostId: w.host.id, password: pw.value }; pw.value = '';
+    try { w.result = await api('POST', '/api/setup/run', body); } catch (e) { w.result = { ok: false, error: e.message, log: '' }; }
+    w.step = 3; await load(false); render();
+  } }, 'Jetzt aktualisieren');
+  const box = h('section', { class: 'panel' });
+  put(box, h('div', { class: 'host-head' }, h('h2', {}, `Prüfskript auf „${w.host.label}“ aktualisieren`), h('span', { class: 'spacer' }), h('button', { onclick: () => { wizard = null; render(); } }, 'Abbrechen')),
+    h('p', {}, g.version != null ? `Auf dem Host läuft Version ${g.version}, aktuell ist Version ${g.expected}.` : 'Die Version auf dem Host ist unbekannt.'),
+    h('p', { class: 'sub' }, 'Es wird dasselbe Prüfskript wie bei der Einrichtung neu aufgespielt. Der Fingerabdruck des Hosts wurde damals bestätigt und wird wieder verwendet. Das root-Passwort wird nur für diesen Vorgang benutzt und nicht gespeichert. Auf dem Host werden nur das Prüfskript unter /etc/diskmon, die zugehörige sudo-Regel und der Schlüsseleintrag des Benutzers diskmon erneuert, am Proxmox selbst ändert sich nichts.'),
+    h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'root-Passwort des Hosts', pw)), msg, h('div', { class: 'row' }, btn));
+  return box;
+}
+
 function wizardPanel() {
   const w = wizard;
+  if (w.mode === 'update' && w.step !== 3) return updatePanel(w);
   const box = h('section', { class: 'panel' });
-  const title = { new: 'Host hinzufügen', redo: `„${w.host?.label}“ neu einrichten`, remove: `Zugang auf „${w.host?.label}“ entfernen` }[w.mode];
+  const title = { new: 'Host hinzufügen', redo: `„${w.host?.label}“ neu einrichten`, remove: `Zugang auf „${w.host?.label}“ entfernen`, update: `Prüfskript auf „${w.host?.label}“ aktualisieren` }[w.mode];
   const close = () => { wizard = null; render(); };
   const msg = h('p', { class: 'error', role: 'alert' });
   const head = h('div', { class: 'host-head' }, h('h2', {}, title), h('span', { class: 'state' }, `Schritt ${w.step} von 3`), h('span', { class: 'spacer' }), w.step < 3 ? h('button', { onclick: close }, 'Abbrechen') : null);
@@ -235,10 +308,10 @@ function wizardPanel() {
   } else {
     const r = w.result;
     put(box, head,
-      r.ok ? h('div', { class: 'finding ok' }, h('b', {}, w.mode === 'remove' ? '✔ Zugang entfernt' : `✔ Eingerichtet${r.disks != null ? `, ${r.disks} Platten gefunden` : ''}`), w.mode === 'remove' ? 'Der Host ist wieder im Ausgangszustand.' : 'Der Host steht jetzt in der Übersicht. Die Zeitplan-Einstellungen findest du unter „Zeitplan & Konto“.')
+      r.ok ? h('div', { class: 'finding ok' }, h('b', {}, w.mode === 'remove' ? '✔ Zugang entfernt' : w.mode === 'update' ? `✔ Aktualisiert auf Version ${r.version ?? ''}` : `✔ Eingerichtet${r.disks != null ? `, ${r.disks} Platten gefunden` : ''}`), w.mode === 'remove' ? 'Der Host ist wieder im Ausgangszustand.' : w.mode === 'update' ? 'Das Prüfskript auf dem Host ist jetzt aktuell.' : 'Der Host steht jetzt in der Übersicht. Die Zeitplan-Einstellungen findest du unter „Zeitplan & Konto“.')
         : h('div', { class: 'finding critical' }, h('b', {}, '✖ Nicht erfolgreich'), r.error ?? ''),
       r.log ? h('details', { open: !r.ok }, h('summary', {}, 'Ausgabe vom Host'), h('pre', { class: 'log' }, r.log)) : null,
-      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: close }, 'Fertig'), r.ok ? null : h('button', { onclick: () => { w.step = 2; render(); } }, 'Erneut versuchen')));
+      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: close }, 'Fertig'), r.ok ? null : h('button', { onclick: () => { w.step = w.mode === 'update' ? 1 : 2; render(); } }, 'Erneut versuchen')));
   }
   return box;
 }
@@ -267,6 +340,7 @@ function viewHelp() {
     D('ZFS-Pool und vdev', 'Ein Pool besteht aus einem oder mehreren vdevs, und ein vdev aus Platten. Fällt ein ganzes vdev aus, ist der Pool verloren. Innerhalb eines Spiegels oder RAID-Z dürfen so viele Platten ausfallen, wie dort angegeben ist.'),
     D('Lese-, Schreib- und Prüfsummenfehler', 'ZFS zählt je Gerät Fehler mit. Prüfsummenfehler bedeuten, dass Daten beim Lesen nicht stimmten. Ein Scrub korrigiert sie meist. Steigen sie weiter, liegt es oft an Kabel, Backplane oder der Platte.'),
     D('Scrub', 'ZFS liest dabei alle Daten und prüft sie gegen die Prüfsummen. Proxmox startet das normalerweise monatlich.'),
+    D('Prüfskript auf dem Host', 'Ein kleines Skript unter /etc/diskmon, das dem Tool nur wenige, fest vorgegebene Befehle erlaubt. Es hat eine Versionsnummer. Ist die Version auf einem Host älter als im Tool, steht „veraltet“, und ein Klick unter „Hosts einrichten“ aktualisiert es.'),
     D('Statistiken', 'Auf der Startseite siehst du Tests pro Monat, wann Tests laufen, Ergebnisse, Abdeckung und Testverlauf, darunter dieselben Zahlen je Host. Der Verlauf beginnt mit dem Tag, ab dem das Tool läuft.'),
     D('Wert (0–100)', 'Grobe Kennzahl aus der Bewertung: 100 gesund, darunter schlechter. Bei SSD/NVMe höchstens die Restlebensdauer.')));
 }

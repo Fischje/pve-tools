@@ -10,6 +10,7 @@ const openApps = [];
 after(() => { for (const a of openApps) { a.closeAllConnections?.(); a.close(); } });
 import { createApp, isPrivateIp } from '../src/server.js';
 import { cleanSettings } from '../src/service.js';
+import { Notifier } from '../src/notify.js';
 
 async function boot() {
   const clock = () => new Date(2026, 10, 3, 9, 0);
@@ -18,6 +19,8 @@ async function boot() {
   const engine = new Engine({ db, hosts: world.hosts, now: clock, makeClient: (h) => new HostClient(new DemoTransport(world, h.id)) });
   for (const h of world.hosts) await engine.pollHost(h.id);
   const auth = new Auth(db);
+  const sent = [], failSend = { on: false };
+  engine.notifier = new Notifier({ db, engine, send: async (m) => { if (failSend.on) throw new Error('Anmeldung am Mailserver abgelehnt'); sent.push(m); } });
   const app = createApp({ db, engine, auth, allowPublic: true });
   openApps.push(app);
   await new Promise((r) => app.listen(0, '127.0.0.1', r));
@@ -28,7 +31,7 @@ async function boot() {
     let json = null; try { json = JSON.parse(text); } catch { /* HTML */ }
     return { status: r.status, json, text, cookie: r.headers.get('set-cookie') };
   };
-  return { app, call, engine, db, close: () => app.close() };
+  return { app, call, engine, db, sent, failSend, close: () => app.close() };
 }
 
 test('Passwort-Hash prüft richtig und falsch', () => {
@@ -193,5 +196,47 @@ test('Pools: vdev-Baum, Zuordnung zu Platten, Füllstand, Bewertung', async () =
   assert.ok(tank.findings.some((f) => f.code === 'vdev-errors'));
   const rpool = pve.pools.find((p) => p.name === 'rpool');
   assert.ok(rpool.vdevs[0].devices.every((d) => d.serial), 'beide Samsung zugeordnet');
+  close();
+});
+
+test('Überblick meldet veraltete Prüfskripte, Abfrage-Einstellungen lassen sich ändern', async () => {
+  const { call, close } = await boot();
+  const o = (await call('GET', '/api/overview')).json;
+  assert.equal(o.hosts.find((h) => h.id === 'pbs').gate.outdated, true);
+  assert.equal(o.hosts.find((h) => h.id === 'pve').gate.outdated, false);
+  assert.equal((await call('PUT', '/api/settings/polling', { idleMinutes: 60, offlineMinutes: 30, runningMinutes: 5 })).status, 200);
+  assert.equal((await call('GET', '/api/settings/polling')).json.idleMinutes, 60);
+  assert.equal((await call('PUT', '/api/settings/polling', { idleMinutes: 1, offlineMinutes: 30, runningMinutes: 5 })).status, 400);
+  close();
+});
+
+test('Mail-API: ohne Oberflächen-Passwort gesperrt, Passwort wird nie ausgegeben, Testmail und Zusammenfassung', async () => {
+  const { call: raw, close, sent, failSend } = await boot();
+  let cookie = null;
+  const call = (m, p, b) => raw(m, p, b, cookie);
+  const cfg = { enabled: true, host: 'mail.example.org', port: 587, security: 'starttls', user: 'u', password: 'mailgeheim1', from: 'platten@example.org', to: 'admin@example.org' };
+  assert.equal((await call('GET', '/api/mail')).json.passwordSet, false);
+  assert.equal((await call('PUT', '/api/mail', cfg)).status, 403);
+  cookie = (await call('POST', '/api/auth/password', { password: 'sehr-geheim-123' })).cookie.split(';')[0];
+  const saved = await call('PUT', '/api/mail', cfg);
+  assert.equal(saved.status, 200);
+  assert.equal(saved.json.passwordSet, true);
+  assert.equal(saved.json.config.enabled, true);
+  assert.ok(saved.json.config.baselineAt, 'bekannte Probleme wurden beim Einschalten übernommen');
+  assert.ok(!JSON.stringify(saved.json).includes('mailgeheim1'));
+  assert.ok(!JSON.stringify((await call('GET', '/api/overview')).json).includes('mailgeheim1'));
+  assert.equal((await call('POST', '/api/mail/test')).status, 200);
+  assert.equal(sent.at(-1).password, 'mailgeheim1');
+  assert.equal((await call('POST', '/api/mail/digest')).status, 200);
+  assert.match(sent.at(-1).subject, /Zusammenfassung/);
+  failSend.on = true;
+  const bad = await call('POST', '/api/mail/test');
+  assert.equal(bad.status, 502);
+  assert.match(bad.json.error, /abgelehnt/);
+  assert.equal((await call('PUT', '/api/mail', { port: 99999 })).status, 400);
+  assert.equal((await call('PUT', '/api/mail', { to: 'kein-mail' })).status, 400);
+  // Passwort löschen
+  await call('PUT', '/api/mail', { clearPassword: true });
+  assert.equal((await call('GET', '/api/mail')).json.passwordSet, false);
   close();
 });
