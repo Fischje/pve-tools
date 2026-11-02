@@ -230,11 +230,12 @@ function hostsTable() {
 function updatePanel(w) {
   const pw = h('input', { type: 'password', autocomplete: 'off' }); const msg = h('p', { class: 'error', role: 'alert' });
   const g = w.host.gate ?? {};
+  const snapRight = h('input', { type: 'checkbox', checked: (w.host.rights ?? []).includes('snapshots') });
   const btn = h('button', { class: 'primary', onclick: async () => {
     msg.textContent = '';
     if (!pw.value) { msg.textContent = 'Bitte das root-Passwort des Hosts eingeben.'; return; }
     btn.disabled = true; btn.textContent = 'Läuft …';
-    const body = { action: 'update', hostId: w.host.id, password: pw.value }; pw.value = '';
+    const body = { action: 'update', hostId: w.host.id, password: pw.value, rights: snapRight.checked ? ['snapshots'] : [] }; pw.value = '';
     try { w.result = await api('POST', '/api/setup/run', body); } catch (e) { w.result = { ok: false, error: e.message, log: '' }; }
     w.step = 3; await load(false); render();
   } }, 'Jetzt aktualisieren');
@@ -242,7 +243,9 @@ function updatePanel(w) {
   put(box, h('div', { class: 'host-head' }, h('h2', {}, `Prüfskript auf „${w.host.label}“ aktualisieren`), h('span', { class: 'spacer' }), h('button', { onclick: () => { wizard = null; render(); } }, 'Abbrechen')),
     h('p', {}, g.version != null ? `Auf dem Host läuft Version ${g.version}, aktuell ist Version ${g.expected}.` : 'Die Version auf dem Host ist unbekannt.'),
     h('p', { class: 'sub' }, 'Es wird dasselbe Prüfskript wie bei der Einrichtung neu aufgespielt. Der Fingerabdruck des Hosts wurde damals bestätigt und wird wieder verwendet. Das root-Passwort wird nur für diesen Vorgang benutzt und nicht gespeichert. Auf dem Host werden nur das Prüfskript unter /etc/diskmon, die zugehörige sudo-Regel und der Schlüsseleintrag des Benutzers diskmon erneuert, am Proxmox selbst ändert sich nichts.'),
-    h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'root-Passwort des Hosts', pw)), msg, h('div', { class: 'row' }, btn));
+    h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'root-Passwort des Hosts', pw)),
+    h('label', {}, snapRight, ' Snapshots auslösen erlauben (nur Proxmox-Hosts wie router und pve, nicht der PBS): das Tool darf dann das vorhandene autosnap-Skript starten, den Snapshot-Schalter setzen und den Cron von proxmox-autosnap aus- und einschalten. Sonst nichts.'),
+    msg, h('div', { class: 'row' }, btn));
   return box;
 }
 
