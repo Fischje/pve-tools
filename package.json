@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.js",
     "demo": "DEMO=1 DATA_DIR=./data-demo node --disable-warning=ExperimentalWarning src/server.js",
+    "test:quick": "node --disable-warning=ExperimentalWarning --test test/rating.test.js test/schedule.test.js test/zfs.test.js test/stats.test.js test/engine.test.js test/notify.test.js test/server.test.js test/provision.test.js test/smtp.test.js test/gate.test.js",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/*.test.js\""
   }
 }

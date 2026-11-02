@@ -22,8 +22,8 @@ function world() {
   writeFileSync(path.join(bin, 'curl'), `#!/usr/bin/env bash\n[[ -f "${root}/down" ]] && exit 22\nexit 0\n`);
   for (const f of ['systemctl', 'curl']) chmodSync(path.join(bin, f), 0o755);
   mkdirSync(path.join(work, 'data')); writeFileSync(path.join(work, 'data', 'disktool.sqlite'), 'DB');
-  const run = () => spawnSync('bash', [path.join(work, 'update.sh')], { cwd: work, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, LISTEN: '127.0.0.1' }, encoding: 'utf8' });
-  const release = (testCmd) => { writeFileSync(path.join(origin, 'package.json'), JSON.stringify({ name: 'x', v: Math.random(), scripts: { test: testCmd } })); sh(origin, 'git add -A && git commit -qm "neue Version"'); };
+  const run = () => spawnSync('bash', [path.join(work, 'update.sh')], { cwd: work, env: { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME ?? root, LISTEN: '127.0.0.1' }, encoding: 'utf8' });
+  const release = (testCmd, quickCmd) => { writeFileSync(path.join(origin, 'package.json'), JSON.stringify({ name: 'x', v: Math.random(), scripts: { test: testCmd, ...(quickCmd ? { 'test:quick': quickCmd } : {}) } })); sh(origin, 'git add -A && git commit -qm "neue Version"'); };
   return { root, work, run, release, sh, head: () => sh(work, 'git rev-parse --short HEAD').trim() };
 }
 
@@ -65,4 +65,21 @@ test('Update: bereits aktuell, und lokale Änderungen werden nicht überschriebe
   const r = w.run();
   assert.notEqual(r.status, 0);
   assert.match(r.stderr, /lokale Änderungen/);
+});
+
+test('Update: auf dem LXC läuft die schnelle Testauswahl, wenn es sie gibt (die volle Suite prüft GitHub vorher)', () => {
+  const w = world(); const vorher = w.head();
+  w.release('node -e "process.exit(1)"', 'node -e "process.exit(0)"'); // volle Suite würde fehlschlagen, die schnelle nicht
+  const r = w.run();
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  assert.notEqual(w.head(), vorher);
+});
+
+test('Update: schlägt die schnelle Testauswahl fehl, wird zurückgerollt und der Grund steht im Protokoll', () => {
+  const w = world(); const vorher = w.head();
+  w.release('node -e "process.exit(0)"', 'node -e "console.error(\'SCHNELL-FEHLER\'); process.exit(1)"');
+  const r = w.run();
+  assert.notEqual(r.status, 0);
+  assert.equal(w.head(), vorher);
+  assert.match(readFileSync(path.join(w.work, 'data', 'letzter-testlauf.log'), 'utf8'), /SCHNELL-FEHLER/);
 });

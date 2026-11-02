@@ -44,8 +44,12 @@ neu="$(git rev-parse HEAD)"
 if [[ "$alt" == "$neu" ]]; then echo "Bereits auf dem neuesten Stand ($(git rev-parse --short HEAD), Zweig $BRANCH)."; exit 0; fi
 echo "Neue Änderungen:"; git --no-pager log --oneline "$alt..$neu"
 
+# Auf dem LXC läuft die schnelle Testauswahl (npm run test:quick), falls vorhanden. Die vollständige Suite hat GitHub vor dem Merge geprüft.
+# Das Ergebnis steht in $DATA_DIR/letzter-testlauf.log, damit man bei einem Fehler den Grund sieht.
 echo "Tests …"
-npm test --silent >/dev/null 2>&1 || zurueck "die Tests der neuen Version schlagen fehl"
+mkdir -p "$DATA_DIR"
+if node -e "process.exit(require('./package.json').scripts?.['test:quick'] ? 0 : 1)" 2>/dev/null; then testcmd=(npm run --silent test:quick); else testcmd=(npm test --silent); fi
+"${testcmd[@]}" > "$DATA_DIR/letzter-testlauf.log" 2>&1 || zurueck "die Tests der neuen Version schlagen fehl (Ausgabe: $DATA_DIR/letzter-testlauf.log)"
 
 echo "Sichere die Datenbank …"
 if systemctl is-active --quiet "$DIENST" 2>/dev/null; then systemctl stop "$DIENST"; gestoppt=1; fi

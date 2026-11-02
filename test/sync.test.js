@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync, copyFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -22,11 +22,13 @@ function world({ cloneBranch = 'main' } = {}) {
   writeFileSync(path.join(bin, 'curl'), `#!/usr/bin/env bash\n[[ -f "${root}/down" ]] && exit 22\nexit 0\n`);
   for (const f of ['systemctl', 'curl']) chmodSync(path.join(bin, f), 0o755);
   mkdirSync(path.join(work, 'data')); writeFileSync(path.join(work, 'data', 'disktool.sqlite'), 'DB');
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, LISTEN: '127.0.0.1' };
+  // Saubere Umgebung und eigene Sperrdatei: Die Tests dürfen weder von der Umgebung eines echten Abgleichs (BRANCH, DATA_DIR …)
+  // noch von dessen Sperrdatei abhängen. Sonst schlagen sie fehl, sobald sync.sh sie selbst startet.
+  const env = { PATH: `${bin}:${process.env.PATH}`, HOME: process.env.HOME ?? root, LISTEN: '127.0.0.1', SYNC_LOCK: path.join(root, 'sync.lock') };
   const run = () => spawnSync('bash', [path.join(work, 'sync.sh')], { cwd: work, env, encoding: 'utf8' });
   const release = (testCmd = 'node -e "process.exit(0)"') => { pkg(testCmd); sh(origin, 'git add -A && git commit -qm "neue Version"'); };
   const starts = () => (existsSync(path.join(root, 'systemctl.log')) ? readFileSync(path.join(root, 'systemctl.log'), 'utf8').split('\n').filter((l) => l.startsWith('start')).length : 0);
-  return { root, work, origin, run, release, sh, starts, head: () => sh(work, 'git rev-parse --short HEAD').trim(), branch: () => sh(work, 'git rev-parse --abbrev-ref HEAD').trim() };
+  return { root, work, origin, env, run, release, sh, starts, head: () => sh(work, 'git rev-parse --short HEAD').trim(), branch: () => sh(work, 'git rev-parse --abbrev-ref HEAD').trim() };
 }
 
 test('Abgleich: nichts Neues => nichts passiert, kein Neustart', () => {
@@ -104,4 +106,37 @@ test('Abgleich: GitHub nicht erreichbar => ruhig beenden', () => {
 
 test('Skripte: Syntax', () => {
   for (const f of ['update.sh', 'sync.sh', 'install-sync.sh']) assert.equal(spawnSync('bash', ['-n', path.resolve(f)]).status, 0, f);
+});
+
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+async function holdLock(file) {
+  const p = spawn('flock', [file, 'sleep', '60'], { detached: true, stdio: 'ignore' });
+  await sleepMs(400);
+  return () => { try { process.kill(-p.pid); } catch { /* schon beendet */ } };
+}
+
+test('Sperrdatei: ein laufender Abgleich blockiert einen zweiten, aber nur auf derselben Sperrdatei', async () => {
+  const w = world(); w.release();
+  const release = await holdLock(w.env.SYNC_LOCK);
+  try {
+    const r = w.run();
+    assert.equal(r.stdout.trim(), '', 'zweiter Lauf auf derselben Sperrdatei tut nichts');
+    assert.equal(w.starts(), 0);
+  } finally { release(); }
+});
+
+test('Regressionstest: die Standard-Sperrdatei eines echten Abgleichs stört die Tests nicht (sie liefen sonst innerhalb von update.sh in einen Rückfall)', async () => {
+  const w = world(); w.release();
+  const release = await holdLock('/tmp/pve-disk-tool-sync.lock'); // so hält der echte Abgleich seine Sperre
+  try {
+    const r = w.run(); // diese Welt nutzt ihre eigene Sperrdatei (SYNC_LOCK)
+    assert.match(r.stdout, /aktualisiert/, r.stdout + r.stderr);
+  } finally { release(); }
+});
+
+test('Abgleich: fehlgeschlagener Testlauf hinterlässt ein Protokoll mit dem Grund', () => {
+  const w = world(); w.release('node -e "console.error(\'DER-GRUND\'); process.exit(1)"');
+  const r = w.run();
+  assert.match(r.stdout, /letzter-testlauf\.log/);
+  assert.match(readFileSync(path.join(w.work, 'data', 'letzter-testlauf.log'), 'utf8'), /DER-GRUND/);
 });

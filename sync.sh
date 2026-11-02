@@ -6,7 +6,8 @@
 set -uo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
-exec 9>/tmp/pve-disk-tool-sync.lock
+# Die Sperrdatei ist einstellbar, damit die Tests von sync.sh nicht mit einem echten Abgleich um dieselbe Sperre streiten.
+exec 9>"${SYNC_LOCK:-/tmp/pve-disk-tool-sync.lock}"
 flock -n 9 || exit 0
 log() { echo "$(date '+%F %T') $*"; }
 
@@ -26,10 +27,10 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
 fi
 
 log "Neue Version $(git rev-parse --short "$REMOTE") auf $BRANCH, aktualisiere …"
-if BRANCH="$BRANCH" ./update.sh 2>&1 | sed 's/^/    /'; [[ "${PIPESTATUS[0]}" == 0 ]]; then
+if BRANCH="$BRANCH" ./update.sh 9>&- 2>&1 | sed 's/^/    /'; [[ "${PIPESTATUS[0]}" == 0 ]]; then
   rm -f "$MARKER"
   log "aktualisiert: $(git log --oneline -1)"
 else
   mkdir -p "$DATA_DIR"; echo "$REMOTE" > "$MARKER"
-  log "FEHLER – Version bleibt bei $(git rev-parse --short HEAD). Nächster Versuch erst bei einer neuen Version auf $BRANCH."
+  log "FEHLER – Version bleibt bei $(git rev-parse --short HEAD). Nächster Versuch erst bei einer neuen Version auf $BRANCH. Ausgabe der Tests: $DATA_DIR/letzter-testlauf.log"
 fi
