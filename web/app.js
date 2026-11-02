@@ -7,6 +7,8 @@ import { globalStats, hostStatsSection } from './stats-view.js';
 import { runningPanel, hostTestsPanel, allTestsPanel } from './tests-view.js';
 import { hostPage } from './host-view.js';
 
+const BRAND = "Fischje's PVE-Tools";
+document.title = BRAND;
 const root = document.getElementById('app');
 let data = null, stats = null, tests = null, view = 'uebersicht', authState = { passwordSet: false, loggedIn: true }, timer = null, dialogOpen = false, flash = {};
 
@@ -388,7 +390,7 @@ function loginView() {
   const pw = h('input', { type: 'password', autocomplete: 'current-password', autofocus: true }); const msg = h('p', { class: 'error' });
   const go = async () => { try { await api('POST', '/api/auth/login', { password: pw.value }); authState.loggedIn = true; await load(); } catch (e) { msg.textContent = e.message; } };
   pw.addEventListener('keydown', (e) => e.key === 'Enter' && go());
-  return h('div', { class: 'panel login' }, h('h2', {}, 'Platten-Gesundheit'), h('p', { class: 'sub' }, 'Bitte Passwort eingeben.'), h('label', { class: 'f' }, 'Passwort', pw), msg, h('div', { class: 'row' }, h('button', { class: 'primary', onclick: go }, 'Anmelden')));
+  return h('div', { class: 'panel login' }, h('h2', {}, BRAND), h('p', { class: 'sub' }, 'Bitte Passwort eingeben.'), h('label', { class: 'f' }, 'Passwort', pw), msg, h('div', { class: 'row' }, h('button', { class: 'primary', onclick: go }, 'Anmelden')));
 }
 
 function render() {
@@ -401,6 +403,7 @@ function render() {
   const scrollY = window.scrollY;
   root.replaceChildren(...[
     h('header', { class: 'top' },
+      h('div', { class: 'brand' }, h('b', {}, BRAND), h('span', { class: 'sub' }, 'Platten, ZFS und Tests')),
       h('div', { class: 'title-row' }, h('div', { class: 'summary' }, h('span', { class: `dot ${data.summary.level}`, 'aria-hidden': 'true' }), h('span', { role: 'status' }, data.summary.text)), h('span', { class: 'sub' }, `Stand ${fmtDT(data.now)}`)),
       h('nav', { class: 'tabs', 'aria-label': 'Bereiche' }, tabs.map(([id, t]) => h('button', { 'aria-current': view === id ? 'page' : null, onclick: () => { view = id; render(); window.scrollTo(0, 0); } }, t)))),
     !authState.passwordSet ? h('div', { class: 'banner warn' }, h('span', {}, 'Es ist noch kein Passwort gesetzt. Die Seite ist nur im lokalen Netz erreichbar, aber jeder dort kann Tests starten.'), h('button', { onclick: () => { view = 'zeitplan'; render(); } }, 'Passwort setzen')) : null,

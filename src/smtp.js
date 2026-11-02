@@ -58,7 +58,7 @@ function connect({ host, port, security, rejectUnauthorized, timeoutMs }) {
 
 export function buildMessage({ from, to, subject, text, hostname }) {
   const body = Buffer.from(String(text).replace(/\r?\n/g, '\r\n'), 'utf8').toString('base64').replace(/(.{76})/g, '$1\r\n');
-  return [`From: ${encHeader('pve-disk-tool')} <${from}>`, `To: ${to.join(', ')}`, `Subject: ${encHeader(subject)}`, `Date: ${new Date().toUTCString().replace('GMT', '+0000')}`,
+  return [`From: ${encHeader("Fischje's PVE-Tools")} <${from}>`, `To: ${to.join(', ')}`, `Subject: ${encHeader(subject)}`, `Date: ${new Date().toUTCString().replace('GMT', '+0000')}`,
     `Message-ID: <${randomBytes(12).toString('hex')}@${hostname}>`, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64', 'X-Mailer: pve-disk-tool', '', body, ''].join('\r\n');
 }
 

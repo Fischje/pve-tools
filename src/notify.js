@@ -84,7 +84,7 @@ export class Notifier {
   poolSignature(p) { return p.findings.filter((f) => ['critical', 'replace'].includes(f.level) || f.code === 'vdev-errors').map((f) => `${f.code}:${f.title}`).sort(); }
   link(c) { return c.baseUrl ? `\nÖffnen: ${c.baseUrl} (Reiter „Hosts im Detail“)\n` : ''; }
   findingLines(list) { return list.filter((f) => f.level !== 'ok').map((f) => ` ${ICON[f.level] ?? '·'} ${f.title}: ${f.text}${f.advice ? `\n    Was tun? ${f.advice}` : ''}`).join('\n'); }
-  foot() { return '\n--\nDiese Mail kommt nur bei einer Änderung und wird nicht wiederholt, solange der Zustand gleich bleibt.\npve-disk-tool'; }
+  foot() { return '\n--\nDiese Mail kommt nur bei einer Änderung und wird nicht wiederholt, solange der Zustand gleich bleibt.\nFischje\'s PVE-Tools'; }
 
   /** Merkt den aktuellen Zustand aller Platten und Pools, ohne Mails zu senden. */
   baseline() {
@@ -153,7 +153,7 @@ export class Notifier {
 
   async sendTest() {
     if (!this.ok()) throw new Error('Bitte zuerst Server, Absender und Empfänger eintragen und speichern.');
-    await this.deliver('[pve-disk-tool] Testmail', `Das ist eine Testmail von pve-disk-tool.\nWenn du sie liest, funktioniert der Mailversand.\n\nGesendet: ${this.engine.now().toLocaleString('de-DE')}${this.foot()}`);
+    await this.deliver('[PVE-Tools] Testmail', `Das ist eine Testmail von Fischje's PVE-Tools.\nWenn du sie liest, funktioniert der Mailversand.\n\nGesendet: ${this.engine.now().toLocaleString('de-DE')}${this.foot()}`);
   }
 
   /** Zusammenfassung aller aktuellen Auffälligkeiten (auf Knopfdruck). */
@@ -169,6 +169,6 @@ export class Notifier {
       for (const p of pools) if (p.level !== 'ok') items.push(` ${ICON[p.level] ?? '·'} Pool ${p.name}: ${p.findings.find((f) => f.level !== 'ok' && f.level !== 'info')?.title ?? p.state}`);
       lines.push(`${h.label ?? h.id}: ${disks.length} Platten${items.length ? '' : ', alles in Ordnung'}`, ...items, '');
     }
-    await this.deliver(`[pve-disk-tool] Zusammenfassung: ${bad ? `${bad} Platte${bad === 1 ? '' : 'n'} brauchen Aufmerksamkeit` : 'alles in Ordnung'}`, `Stand ${this.engine.now().toLocaleString('de-DE')}\n\n${lines.join('\n')}${this.link(c)}${this.foot()}`);
+    await this.deliver(`[PVE-Tools] Zusammenfassung: ${bad ? `${bad} Platte${bad === 1 ? '' : 'n'} brauchen Aufmerksamkeit` : 'alles in Ordnung'}`, `Stand ${this.engine.now().toLocaleString('de-DE')}\n\n${lines.join('\n')}${this.link(c)}${this.foot()}`);
   }
 }

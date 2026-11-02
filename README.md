@@ -1,4 +1,6 @@
-# pve-disk-tool
+# Fischje's PVE-Tools
+
+Das Repo heißt noch `pve-disk-tool`, weil es als Platten-Monitor angefangen hat.
 
 Eine kleine Website nur für das lokale Netz, die den Zustand der Festplatten (HDD, SATA-SSD, NVMe) von Proxmox VE und
 Proxmox Backup Server so zeigt, dass es auch Laien verstehen. Das Tool läuft in einem eigenen LXC. Auf den Proxmox-Hosts
