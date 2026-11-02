@@ -57,6 +57,32 @@ if [[ -n "${DISKMON_RECHTE+x}" ]]; then
   chmod 0644 "$ZIEL/rechte"
 fi
 
+# Mit dem Recht "snapshots" wird auch der verwaltete Wrapper autosnap-run (v2) installiert, damit das Tool Aufbewahrung und Pausentag
+# ändern kann. Der alte Wrapper bleibt als autosnap-run.vorher-<Zeit> erhalten. Seine Werte werden in /etc/autosnap.conf übernommen.
+if [[ ",${DISKMON_RECHTE:-}," == *,snapshots,* && -f "$HIER/autosnap-run" ]]; then
+  WRAP=/usr/local/sbin/autosnap-run
+  if [[ ! -x /usr/local/sbin/proxmox-autosnap.py ]]; then
+    echo "Hinweis: /usr/local/sbin/proxmox-autosnap.py fehlt, der Wrapper autosnap-run wird nicht installiert."
+  else
+    if [[ -f "$WRAP" ]] && ! grep -q '^# autosnap-run v2' "$WRAP"; then
+      cp -p "$WRAP" "$WRAP.vorher-$(date +%Y%m%d%H%M%S)"
+      if [[ ! -e /etc/autosnap.conf ]]; then
+        num() { sed -n "s/^$1=\([0-9]\{1,3\}\).*/\1/p" "$WRAP" | head -1; }
+        keep() { sed -n "s/^[[:space:]]*$1)[[:space:]]*KEEP=\([0-9]\{1,3\}\).*/\1/p" "$WRAP" | head -1; }
+        kh="$(keep hourly)"; kw="$(keep weekly)"; km="$(keep monthly)"; pd="$(num PAUSE_DAY)"
+        tg="$(sed -n 's/^TAG="\([A-Za-z0-9_-]\{1,32\}\)".*/\1/p' "$WRAP" | head -1)"
+        [[ -n "$tg" ]] || tg="$(sed -n 's/.*--tags \([A-Za-z0-9_-]\{1,32\}\).*/\1/p' "$WRAP" | head -1)"
+        grep -q 'pct list' "$WRAP" && onlyrun=1 || onlyrun=0
+        printf 'KEEP_HOURLY=%s\nKEEP_WEEKLY=%s\nKEEP_MONTHLY=%s\nPAUSE_DAY=%s\nMONTHLY_DAY=1\nTAG=%s\nONLY_RUNNING=%s\n' "${kh:-8}" "${kw:-1}" "${km:-1}" "${pd:-1}" "${tg:-autosnap}" "$onlyrun" > /etc/autosnap.conf
+        chmod 0644 /etc/autosnap.conf
+        echo "Werte aus dem alten Wrapper übernommen: /etc/autosnap.conf"
+      fi
+    fi
+    install -m 0755 -o root -g root "$HIER/autosnap-run" "$WRAP"
+    echo "Wrapper autosnap-run (v2) installiert."
+  fi
+fi
+
 tmp="$(mktemp)"
 cat > "$tmp" <<SUDO
 # pve-disk-tool: Benutzer $BENUTZER darf nur das Prüfskript als root ausführen.

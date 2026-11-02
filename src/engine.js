@@ -2,7 +2,7 @@
 import { rateKernel } from './kernel.js';
 import { DEFAULT_SETTINGS, decide, canStartManual, advanceProgress, dayKey } from './schedule.js';
 import { rate } from './rating.js';
-import { dueSnapshots, SNAP_DEFAULTS, LABEL_DE } from './snapshots.js';
+import { dueSnapshots, SNAP_DEFAULTS, LABEL_DE, planOf, cleanPlan } from './snapshots.js';
 import { ratePool } from './zfs.js';
 
 const MIN = 60000;
@@ -216,7 +216,7 @@ export class Engine {
     const as = this.db.getAutosnap(hostId);
     const now = this.now();
     const uptimeSec = hs.uptimeSec != null && hs.uptimeAt ? hs.uptimeSec + (now - hs.uptimeAt) / 1000 : null;
-    const due = dueSnapshots(now, { pauseDay: as?.pauseDay ?? null, enabled: !as || !as.known || as.enabled, uptimeSec, last: this.snapLast(hostId) });
+    const due = dueSnapshots(now, { pauseDay: as?.pauseDay ?? null, enabled: !as || !as.known || as.enabled, uptimeSec, last: this.snapLast(hostId), plan: this.snapCtl(hostId).plan });
     for (const { label, force } of due) await this.runSnapshot(hostId, label, { force });
   }
 
@@ -245,6 +245,28 @@ export class Engine {
     await this.pollBackups(hostId, c, this.now(), true).catch(() => {});
     this.event(hostId, null, mode === 'tool' ? 'Snapshots: das Tool löst jetzt aus, der Cron auf dem Host ist aus' : 'Snapshots: zurück auf Cron auf dem Host');
   }
+  /**
+   * Planung ändern. Zeitpunkte gelten im Tool. Aufbewahrung und Pausentag stehen auf dem Host (verwalteter Wrapper v2), dafür muss der Wrapper installiert sein.
+   * @param {{plan?:object, keep?:{hourly:number,weekly:number,monthly:number}, pauseDay?:number|null}} o pauseDay: 0–6 (So–Sa) oder null (keiner)
+   */
+  async setSnapPlan(hostId, { plan, keep, pauseDay }) {
+    this.snapGuard(hostId);
+    const as = this.db.getAutosnap(hostId);
+    const next = cleanPlan({ ...planOf(this.snapCtl(hostId).plan), ...(plan ?? {}) });
+    if (keep || pauseDay !== undefined) {
+      if (!as?.managed) throw new Error('Aufbewahrung und Pausentag lassen sich erst ändern, wenn auf dem Host der verwaltete Wrapper installiert ist (Skript aktualisieren mit Haken „Snapshots auslösen erlauben“).');
+      const k = { hourly: as.keep.hourly, weekly: as.keep.weekly, monthly: as.keep.monthly, ...(keep ?? {}) };
+      const num = (v, lo, hi, name) => { const n = Number(v); if (!Number.isInteger(n) || n < lo || n > hi) throw new Error(`${name}: erlaubt sind ${lo} bis ${hi}`); return n; };
+      const pd = pauseDay === undefined ? (as.pauseDay == null ? 0 : as.pauseDay || 7) : (pauseDay === null ? 0 : num(pauseDay, 0, 6, 'Pausentag') || 7);
+      await this.client(hostId).snapConf({ keepHourly: num(k.hourly, 1, 99, 'Aufbewahrung stündlich'), keepWeekly: num(k.weekly, 1, 52, 'Aufbewahrung wöchentlich'), keepMonthly: num(k.monthly, 1, 36, 'Aufbewahrung monatlich'), pauseDay: pd, monthlyDay: next.monthlyDay });
+    } else if (as?.managed && as.monthlyDay !== next.monthlyDay) {
+      await this.client(hostId).snapConf({ keepHourly: as.keep.hourly, keepWeekly: as.keep.weekly, keepMonthly: as.keep.monthly, pauseDay: as.pauseDay == null ? 0 : as.pauseDay || 7, monthlyDay: next.monthlyDay });
+    }
+    this.db.setSetting(`snapctl:${hostId}`, JSON.stringify({ ...this.snapCtl(hostId), plan: next }));
+    this.event(hostId, null, 'Snapshot-Planung geändert');
+    await this.pollBackups(hostId, this.client(hostId), this.now(), true).catch(() => {});
+  }
+  async snapDryRun(hostId, label) { this.snapGuard(hostId); return this.client(hostId).snapDryRun(label); }
   async setSnapSwitch(hostId, on) { this.snapGuard(hostId); await this.client(hostId).snapSwitch(on); this.event(hostId, null, `Snapshots ${on ? 'eingeschaltet' : 'ausgeschaltet'}`); this.pollBackups(hostId, this.client(hostId), this.now(), true).catch(() => {}); }
 
   async startNow(hostId, serial, plan, origin) {

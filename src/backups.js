@@ -106,18 +106,30 @@ export function describeCron(spec) {
 export function parseAutosnap(text) {
   const t = String(text ?? '');
   const part = (name) => { const m = new RegExp(`^== ${name}\\n([\\s\\S]*?)(?=^== |\\s*$(?![\\s\\S]))`, 'm').exec(t); return m ? m[1] : ''; };
-  const wrapper = part('wrapper'), cron = part('cron'), log = part('log');
+  const wrapper = part('wrapper'), cron = part('cron'), log = part('log'), confText = part('conf');
   const keep = {};
   for (const l of ['hourly', 'weekly', 'monthly']) { const m = new RegExp(`^\\s*${l}\\)[^\\n]*?KEEP=(\\d+)`, 'm').exec(wrapper); if (m) keep[l] = Number(m[1]); }
   const pause = /^\s*PAUSE_DAY=(\d)/m.exec(wrapper);
-  const tag = /^\s*TAG="?([\w-]+)"?/m.exec(wrapper)?.[1] ?? /--tags\s+(\S+)/.exec(wrapper)?.[1] ?? 'autosnap';
+  let tag = /^\s*TAG="?([\w-]+)"?/m.exec(wrapper)?.[1] ?? /--tags\s+(\S+)/.exec(wrapper)?.[1] ?? 'autosnap';
+  // Verwalteter Wrapper (v2): Die Werte stehen in /etc/autosnap.conf, im Skript nur die Standardwerte.
+  const managed = /^# autosnap-run v2/m.test(wrapper);
+  const conf = {};
+  for (const l of confText.split('\n')) { const m = /^([A-Z_]+)=(\S+)$/.exec(l.trim()); if (m) conf[m[1]] = m[2]; }
+  const cn = (k, d) => (/^\d{1,3}$/.test(conf[k] ?? '') ? Number(conf[k]) : d);
+  let pauseDay = pause ? Number(pause[1]) : null, onlyRunning = /pct list/.test(wrapper), monthlyDay = 1;
+  if (managed) {
+    keep.hourly = cn('KEEP_HOURLY', 8); keep.weekly = cn('KEEP_WEEKLY', 1); keep.monthly = cn('KEEP_MONTHLY', 1);
+    const pd = cn('PAUSE_DAY', 1); pauseDay = pd === 0 ? null : pd % 7; // 0 = kein Pausentag, 7 = Sonntag
+    monthlyDay = cn('MONTHLY_DAY', 1); onlyRunning = cn('ONLY_RUNNING', 0) === 1;
+    if (/^[\w-]{1,32}$/.test(conf.TAG ?? '')) tag = conf.TAG;
+  }
   const entries = [];
   for (const l of cron.split('\n')) {
     const s = l.trim(); if (!s || s.startsWith('#') || /^[A-Z_]+=/.test(s)) continue;
     const m = CRON_RE.exec(s); if (m) entries.push({ spec: m[1], text: describeCron(m[1]), user: m[2], command: m[3] });
   }
   return {
-    enabled: /^schalter:\s*an/mi.test(t), known: /^schalter:/m.test(t), keep, pauseDay: pause ? Number(pause[1]) : null, tag, cron: entries,
+    enabled: /^schalter:\s*an/mi.test(t), known: /^schalter:/m.test(t), keep, pauseDay, tag, cron: entries, managed, monthlyDay, onlyRunning,
     log: log.split('\n').map((x) => x.trim()).filter((x) => x && !x.startsWith('-- ')).slice(-40),
   };
 }

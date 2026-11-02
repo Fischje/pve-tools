@@ -1,5 +1,5 @@
 // Bereitet die Daten für die Oberfläche auf (Bewertung, nächste Termine, Banner, Zusammenfassung).
-import { nextSlots } from './snapshots.js';
+import { nextSlots, planOf } from './snapshots.js';
 import { rate, LEVEL_LABEL, LEVEL_ORDER } from './rating.js';
 import { testWindow, nextPlanned, blockedIntervals, dayAllowed, dayKey, DEFAULT_SETTINGS } from './schedule.js';
 import { ratePool } from './zfs.js';
@@ -185,9 +185,9 @@ const lv = (l) => ['ok', 'info', 'watch', 'replace'].indexOf(l);
 /** Zustand der Snapshot-Auslösung durch das Tool für die Oberfläche. */
 function snapControl(engine, hostId, as, now) {
   const ctl = engine.snapCtl(hostId), rights = engine.hostRights(hostId), last = engine.snapLast(hostId);
-  const next = nextSlots(new Date(now), as?.pauseDay ?? null);
+  const plan = planOf(ctl.plan), next = nextSlots(new Date(now), as?.pauseDay ?? null, plan);
   return {
-    mode: ctl.mode, allowed: rights.includes('snapshots'), rights,
+    mode: ctl.mode, allowed: rights.includes('snapshots'), rights, plan, managed: !!as?.managed,
     last: Object.fromEntries(Object.entries(last).map(([k, v]) => [k, { ts: iso(v.ts), ok: v.ok, text: v.text }])),
     next: Object.fromEntries(Object.entries(next).map(([k, v]) => [k, iso(v)])),
     cronStillActive: ctl.mode === 'tool' && !!as?.cron?.length,

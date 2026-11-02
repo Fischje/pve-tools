@@ -366,3 +366,24 @@ test('Snapshot-Steuerung per API: übernehmen, Schalter, Lauf von Hand, Rechte u
   assert.equal((await call('POST', '/api/hosts/pve/snapshots', { action: 'mode', mode: 'quatsch' })).status, 400);
   await close();
 });
+
+test('Snapshot-Planung per API: speichern, Probelauf, ungültige Werte werden abgelehnt', async () => {
+  const { call, close, engine } = await boot();
+  await engine.pollHost('pve', { force: true });
+  const sc = async () => (await call('GET', '/api/backups')).json.hosts.find((h) => h.id === 'pve').snapControl;
+  assert.equal((await sc()).managed, true);
+  const plan = { hourly: true, hourlyMinute: 20, weekly: true, weeklyDay: 5, weeklyTime: '02:15', monthly: false, monthlyDay: 3, monthlyTime: '01:00' };
+  assert.equal((await call('POST', '/api/hosts/pve/snapshots', { action: 'plan', plan, keep: { hourly: 10, weekly: 2, monthly: 4 }, pauseDay: 2 })).status, 200);
+  const s = await sc();
+  assert.equal(s.plan.hourlyMinute, 20); assert.equal(s.plan.monthly, false); assert.equal(s.plan.weeklyTime, '02:15');
+  const b = (await call('GET', '/api/backups')).json.hosts.find((h) => h.id === 'pve').autosnap;
+  assert.deepEqual(b.keep, { hourly: 10, weekly: 2, monthly: 4 });
+  assert.equal(b.pauseDay, 2);
+  const dry = await call('POST', '/api/hosts/pve/snapshots', { action: 'dryrun', label: 'weekly' });
+  assert.equal(dry.status, 200); assert.match(dry.json.text, /Aufbewahrung 2/);
+  for (const bad of [{ plan: { ...plan, hourlyMinute: 99 } }, { plan: { ...plan, weeklyTime: '25:00' } }, { plan: { ...plan, monthlyDay: 'x' } }, { keep: { hourly: 500 } }, { pauseDay: 9 }]) {
+    assert.equal((await call('POST', '/api/hosts/pve/snapshots', { action: 'plan', ...bad })).status, 400, JSON.stringify(bad));
+  }
+  assert.equal((await call('POST', '/api/hosts/pve/snapshots', { action: 'dryrun', label: 'x;id' })).status, 400);
+  await close();
+});

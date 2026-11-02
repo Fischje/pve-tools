@@ -26,11 +26,14 @@
 # Schreibende Befehle, nur wenn die Rechtegruppe "snapshots" bei der Einrichtung freigegeben wurde (mit dem root-Passwort):
 #   snap-run hourly|weekly|monthly [force]   startet den vorhandenen /usr/local/sbin/autosnap-run mit dieser Bezeichnung
 #   snap-switch on|off                       setzt/löscht /etc/autosnap.disabled (Snapshots aus/an)
+#   snap-conf <stündlich> <wöchentlich> <monatlich> <pausentag> <monatstag>
+#                                            schreibt /etc/autosnap.conf (Aufbewahrung 1–99/1–52/1–36, Pausentag 0=keiner oder 1–7, Monatstag 1–28)
+#   snap-dryrun hourly|weekly|monthly        Probelauf ohne Wirkung (zeigt, welche Container betroffen wären)
 #   snap-cron on|off|status                  benennt /etc/cron.d/proxmox-autosnap um (aus) bzw. zurück (an), damit nie zwei Auslöser laufen
 set -euo pipefail
 
 # Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
-GATE_VERSION=6
+GATE_VERSION=7
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
@@ -116,6 +119,7 @@ case "${a[0]}" in
     echo "schalter: $([[ -e /etc/autosnap.disabled ]] && echo aus || echo an)"
     echo "== wrapper"; cat /usr/local/sbin/autosnap-run 2>/dev/null || true
     echo "== cron"; cat /etc/cron.d/proxmox-autosnap 2>/dev/null || true
+    echo "== conf"; cat /etc/autosnap.conf 2>/dev/null || true
     echo "== log"; journalctl -t autosnap -n 40 --no-pager -o short-iso 2>/dev/null || true ;;
   rechte)
     [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
@@ -133,6 +137,33 @@ case "${a[0]}" in
     [[ ${#a[@]} -eq 2 && "${a[1]}" =~ ^(on|off)$ ]] || fail "Argumente: snap-switch on|off"
     if [[ "${a[1]}" == "off" ]]; then touch /etc/autosnap.disabled; else rm -f /etc/autosnap.disabled; fi
     echo "schalter: $([[ -e /etc/autosnap.disabled ]] && echo aus || echo an)" ;;
+  snap-conf)
+    need snapshots
+    [[ ${#a[@]} -eq 6 ]] || fail "Argumente: snap-conf <stündlich> <wöchentlich> <monatlich> <pausentag> <monatstag>"
+    for i in 1 2 3 4 5; do [[ "${a[$i]}" =~ ^[0-9]{1,2}$ ]] || fail "keine Zahl: ${a[$i]}"; done
+    kh=$((10#${a[1]})); kw=$((10#${a[2]})); km=$((10#${a[3]})); pd=$((10#${a[4]})); md=$((10#${a[5]}))
+    (( kh >= 1 && kh <= 99 )) || fail "stündlich: erlaubt sind 1 bis 99"
+    (( kw >= 1 && kw <= 52 )) || fail "wöchentlich: erlaubt sind 1 bis 52"
+    (( km >= 1 && km <= 36 )) || fail "monatlich: erlaubt sind 1 bis 36"
+    (( pd >= 0 && pd <= 7 )) || fail "pausentag: erlaubt sind 0 (keiner) oder 1 bis 7"
+    (( md >= 1 && md <= 28 )) || fail "monatstag: erlaubt sind 1 bis 28"
+    # Auswahl (Tag, nur laufende) bleibt, wie sie ist; nur die Werte aus dem Befehl werden neu gesetzt.
+    tag="autosnap"; onlyrun=0
+    if [[ -r /etc/autosnap.conf ]]; then
+      t="$(sed -n 's/^TAG=\([A-Za-z0-9_-]\{1,32\}\)$/\1/p' /etc/autosnap.conf | head -1)"; [[ -n "$t" ]] && tag="$t"
+      o="$(sed -n 's/^ONLY_RUNNING=\([01]\)$/\1/p' /etc/autosnap.conf | head -1)"; [[ -n "$o" ]] && onlyrun="$o"
+    fi
+    tmp="$(mktemp /etc/autosnap.conf.XXXXXX)"
+    printf 'KEEP_HOURLY=%s\nKEEP_WEEKLY=%s\nKEEP_MONTHLY=%s\nPAUSE_DAY=%s\nMONTHLY_DAY=%s\nTAG=%s\nONLY_RUNNING=%s\n' "$kh" "$kw" "$km" "$pd" "$md" "$tag" "$onlyrun" > "$tmp"
+    chmod 0644 "$tmp"; mv "$tmp" /etc/autosnap.conf
+    cat /etc/autosnap.conf ;;
+  snap-dryrun)
+    need snapshots
+    [[ ${#a[@]} -eq 2 && "${a[1]}" =~ ^(hourly|weekly|monthly)$ ]] || fail "Argumente: snap-dryrun hourly|weekly|monthly"
+    [[ -x /usr/local/sbin/autosnap-run ]] || fail "autosnap-run fehlt"
+    grep -q '^# autosnap-run v2' /usr/local/sbin/autosnap-run || fail "autosnap-run ist noch nicht die verwaltete Version (Skript aktualisieren mit Haken Snapshots auslösen erlauben)"
+    export DRYRUN=1 FORCE=1
+    exec flock -n /run/diskmon-snap.lock /usr/local/sbin/autosnap-run "${a[1]}" ;;
   snap-cron)
     need snapshots
     [[ ${#a[@]} -eq 2 && "${a[1]}" =~ ^(on|off|status)$ ]] || fail "Argumente: snap-cron on|off|status"

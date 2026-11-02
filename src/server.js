@@ -125,7 +125,11 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       try {
         if (b.action === 'mode') await engine.setSnapMode(hostId, b.mode);
         else if (b.action === 'switch') await engine.setSnapSwitch(hostId, !!b.on);
-        else if (b.action === 'run') {
+        else if (b.action === 'plan') await engine.setSnapPlan(hostId, { plan: b.plan, keep: b.keep, pauseDay: 'pauseDay' in b ? b.pauseDay : undefined });
+        else if (b.action === 'dryrun') {
+          if (!['hourly', 'weekly', 'monthly'].includes(b.label)) throw new Error('Ungültige Bezeichnung');
+          return send(res, 200, { ok: true, text: await engine.snapDryRun(hostId, b.label) });
+        } else if (b.action === 'run') {
           if (!['hourly', 'weekly', 'monthly'].includes(b.label)) throw new Error('Ungültige Bezeichnung');
           const r = await engine.runSnapshot(hostId, b.label, { force: b.label === 'monthly', manual: true });
           if (!r.ok) throw new Error(r.text || 'Lauf fehlgeschlagen');

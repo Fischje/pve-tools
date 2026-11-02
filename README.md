@@ -42,6 +42,7 @@ npm run demo        # Demo mit simulierten Hosts
 | `src/stats.js`, `src/zfs.js` | Statistik-Berechnung, ZFS-Auswertung (Pools, vdevs, Scrub) |
 | `src/server.js`, `src/auth.js`, `src/service.js` | Webserver, Passwort, Aufbereitung für die Oberfläche |
 | `src/kernel.js` | Auswertung der Kernel-Meldungen zu SATA-/NVMe-Verbindungsfehlern |
+| `host-setup/autosnap-run` | Verwalteter Wrapper für proxmox-autosnap (liest /etc/autosnap.conf) |
 | `src/snapshots.js` | Zeitplan der Snapshots, die das Tool auslöst (fällig, nachholen, Pausentag) |
 | `src/backups.js` | Auswertung von Gästen, Snapshots, vzdump-Läufen und proxmox-autosnap |
 | `src/smtp.js`, `src/notify.js` | Mailversand und die Regeln, wann eine Mail kommt |

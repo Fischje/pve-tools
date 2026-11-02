@@ -127,10 +127,12 @@ export class DemoTransport {
       case 'version': return ok(String(this.id === 'pbs' ? 3 : EXPECTED_GATE_VERSION)); // pbs ist in der Demo absichtlich veraltet
       case 'kernel': return ok('');
       case 'rechte': return ok(this.id === 'pve' || this.id === 'router' ? (w.rights?.get(this.id) ?? (this.id === 'pve' ? ['snapshots'] : [])).join('\n') : '');
-      case 'snap-run': case 'snap-switch': case 'snap-cron': {
+      case 'snap-run': case 'snap-switch': case 'snap-cron': case 'snap-conf': case 'snap-dryrun': {
         const r = w.rights?.get(this.id) ?? (this.id === 'pve' ? ['snapshots'] : []);
         if (!r.includes('snapshots')) return { code: 64, stdout: '', stderr: "gate: Recht 'snapshots' ist für diesen Host nicht freigegeben" };
         (st.snapCalls ??= []).push(command);
+        if (a[0] === 'snap-conf') { st.conf = { ...(st.conf ?? {}), KEEP_HOURLY: a[1], KEEP_WEEKLY: a[2], KEEP_MONTHLY: a[3], PAUSE_DAY: a[4], MONTHLY_DAY: a[5], TAG: st.conf?.TAG ?? 'autosnap', ONLY_RUNNING: st.conf?.ONLY_RUNNING ?? 1 }; return ok('ok'); }
+        if (a[0] === 'snap-dryrun') return ok(`Wrapper: autosnap-run v2, Bezeichnung ${a[1]}, Aufbewahrung ${(st.conf ?? {})['KEEP_' + a[1].toUpperCase()] ?? 8}, Auswahl: laufende Container mit Tag autosnap: 109 112 113 118\nContainer 109: würde Snapshot anlegen (Demo)`);
         if (a[0] === 'snap-cron') { if (a[1] === 'off' && !st.cronStuck) st.cronOff = true; if (a[1] === 'on') st.cronOff = false; return ok(`cron: ${st.cronOff ? 'vom-tool-aus' : 'an'}`); }
         if (a[0] === 'snap-switch') { st.snapOff = a[1] === 'off'; return ok(`schalter: ${st.snapOff ? 'aus' : 'an'}`); }
         return st.snapFail ? { code: 1, stdout: '', stderr: 'autosnap: Fehler (Demo)' } : ok('autosnap: ok');
@@ -139,7 +141,7 @@ export class DemoTransport {
       case 'snapshots': { if (this.id === 'pbs') return ok(''); return ok(demoSnapshots(this.id, w.clock()).map((r) => `${r.type}\t${r.vmid}\t${JSON.stringify(r.list)}`).join('\n') + '\n'); }
       case 'tasks': { if (this.id === 'pbs') return ok(''); return ok(JSON.stringify(demoBackups(this.id, w.clock()).tasks)); }
       case 'tasklog': { const log = demoBackups(this.id, w.clock()).logs[a[1]]; return log ? ok(JSON.stringify(log)) : { code: 64, stdout: '', stderr: 'gate: unbekannte Aufgabe' }; }
-      case 'autosnap': { if (this.id === 'pbs') return ok(''); return ok(demoAutosnapText(this.id, w.clock(), { cronOff: !!st.cronOff, off: !!st.snapOff })); }
+      case 'autosnap': { if (this.id === 'pbs') return ok(''); return ok(demoAutosnapText(this.id, w.clock(), { cronOff: !!st.cronOff, off: !!st.snapOff, conf: this.id === 'pve' ? (st.conf ??= { KEEP_HOURLY: 8, KEEP_WEEKLY: 1, KEEP_MONTHLY: 1, PAUSE_DAY: 1, MONTHLY_DAY: 1, TAG: 'autosnap', ONLY_RUNNING: 1 }) : null })); }
       case 'uptime': return ok(String((w.clock().getTime() - st.bootAt) / 1000));
       case 'list': return ok({ blockdevices: [...st.disks.values()].map((d) => ({ name: d.json.device.name.slice(5), type: 'disk', model: d.json.model_name, serial: d.json.serial_number, size: d.json.user_capacity.bytes, rota: d.json.rotation_rate > 0, tran: d.json.device.protocol === 'NVMe' ? 'nvme' : 'sata' })) });
       case 'zpool': { const h = w.hosts.find((x) => x.id === this.id); const t = zpoolStatusText(h.pools); return ok(st.scrub ? t.replace(/scrub repaired[^\n]*/, 'scrub in progress since Tue Nov  3 10:00:00 2026\n\t1.20T scanned at 1.0G/s, 400G issued at 500M/s, 3.00T total\n\t10.00% done, 05:00:00 to go') : t); }

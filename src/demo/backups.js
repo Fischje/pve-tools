@@ -97,7 +97,7 @@ export function demoBackups(hostId, now) {
   return { tasks, logs };
 }
 
-export function demoAutosnapText(hostId, now, { cronOff = false, off = false } = {}) {
+export function demoAutosnapText(hostId, now, { cronOff = false, off = false, conf = null } = {}) {
   const t = new Date(now.getTime() - 3600e3);
-  return `schalter: ${off ? 'aus' : 'an'}\n== wrapper\n${hostId === 'router' ? WRAPPER_ROUTER : WRAPPER_PVE}\n== cron\n${cronOff ? '' : CRON}\n== log\n${t.toISOString().slice(0, 19)}+01:00 ${hostId} autosnap[4242]: VM 112 - Removing snapshot autohourly000101000000\n`;
+  return `schalter: ${off ? 'aus' : 'an'}\n== wrapper\n${conf ? '#!/bin/bash\n# autosnap-run v2 (Demo)\nKEEP_HOURLY=8\n' : hostId === 'router' ? WRAPPER_ROUTER : WRAPPER_PVE}\n== cron\n${cronOff ? '' : CRON}\n== conf\n${conf ? Object.entries(conf).map(([k, v]) => `${k}=${v}`).join('\n') : ''}\n== log\n${t.toISOString().slice(0, 19)}+01:00 ${hostId} autosnap[4242]: VM 112 - Removing snapshot autohourly000101000000\n`;
 }

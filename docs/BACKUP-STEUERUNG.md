@@ -60,8 +60,16 @@ Das Tool bekommt kein Löschrecht.
 - **Ein/Aus-Schalter** und **„Jetzt stündlichen Lauf auslösen“** in der Oberfläche.
 - **Zu bedenken:** Fällt der LXC `pve-tools` aus, entstehen keine Snapshots mehr (der Cron lief auf den Hosts selbst). Die vorhandene Prüfung „ausgebliebene Stunden-Snapshots“
   zeigt das an. Ein Alarm per Mail dafür ist ein nächster Schritt.
-- **Noch offen in dieser Stufe:** Aufbewahrung (`KEEP`) und Pausentag in der Oberfläche ändern. Dafür muss der Wrapper die Werte aus einer Datei lesen statt fest im Skript.
-  Das setzt voraus, die echten Wrapper zu kennen (bitte `cat /usr/local/sbin/autosnap-run` von `router` und `pve` schicken).
+- **Planung ändern** (Reiter „Backups & Snapshots“, „Planung ändern“):
+  - *Zeitpunkte* (stündlich Minute, wöchentlich Tag und Uhrzeit, monatlich Tag und Uhrzeit, je einzeln abschaltbar) gelten im Tool, also nur, wenn das Tool auslöst.
+  - *Aufbewahrung* (1–99 stündlich, 1–52 wöchentlich, 1–36 monatlich) und *Pausentag* stehen auf dem Host in `/etc/autosnap.conf`. Das Tool schreibt die Datei über den
+    Befehl `snap-conf`, nur Zahlen in festen Grenzen.
+  - *Probelauf*: `snap-dryrun` zeigt, welche Container betroffen wären, ohne etwas anzulegen oder zu löschen.
+- **Verwalteter Wrapper (v2):** `host-setup/autosnap-run` ersetzt eure beiden Wrapper (router: alle mit Tag, pve: nur laufende mit Tag). Er arbeitet wie bisher
+  (Hauptschalter, Pausentag, Datumsfenster beim Monatslauf, `FORCE`, `DRYRUN`), liest aber die Werte aus `/etc/autosnap.conf`. Beim Einrichten mit dem Haken
+  „Snapshots auslösen erlauben“ wird er installiert. Der alte Wrapper bleibt als `/usr/local/sbin/autosnap-run.vorher-<Zeit>` erhalten, seine Werte (Aufbewahrung,
+  Pausentag, Tag, nur laufende) werden einmalig in `/etc/autosnap.conf` übernommen. Zurück geht es, indem ihr die Sicherung wieder nach `autosnap-run` kopiert.
+- **Offen:** Die Auswahl der Gäste (Tag `autosnap`) lässt sich noch nicht in der Oberfläche setzen. Das bräuchte ein weiteres Schreibrecht.
 
 ## Stufe 3: Backup-Lauf durch das Tool (Plan)
 

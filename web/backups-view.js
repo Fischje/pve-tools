@@ -58,6 +58,42 @@ function hostPanel(b, host, data) {
           h('button', { onclick: () => post({ action: 'switch', on: !as.enabled }, as.enabled ? 'Snapshots ausgeschaltet.' : 'Snapshots eingeschaltet.') }, as.enabled ? 'Snapshots ausschalten' : 'Snapshots einschalten'),
           h('button', { onclick: () => { if (confirm('Jetzt einen stündlichen Snapshot-Lauf auslösen?')) post({ action: 'run', label: 'hourly' }, 'Lauf ausgelöst.'); } }, 'Jetzt stündlichen Lauf auslösen')));
 
+  // Planung: Zeitpunkte (gelten, wenn das Tool auslöst) und Aufbewahrung/Pausentag (stehen auf dem Host im verwalteten Wrapper)
+  const planBox = !sc?.allowed || !as?.known ? null : (() => {
+    const p = sc.plan, k = as.keep ?? {};
+    const num = (v, lo, hi, w = 5) => h('input', { type: 'number', min: lo, max: hi, value: v, style: `width:${w}em` });
+    const sel = (opts, v) => h('select', {}, opts.map(([val, t]) => h('option', { value: val, selected: String(val) === String(v) }, t)));
+    const chk = (v) => h('input', { type: 'checkbox', checked: v });
+    const f = {
+      hourly: chk(p.hourly), hourlyMinute: num(p.hourlyMinute, 0, 59),
+      weekly: chk(p.weekly), weeklyDay: sel(WD.map((t, i) => [i, t]), p.weeklyDay), weeklyTime: h('input', { type: 'time', value: p.weeklyTime }),
+      monthly: chk(p.monthly), monthlyDay: num(p.monthlyDay, 1, 28), monthlyTime: h('input', { type: 'time', value: p.monthlyTime }),
+      kh: num(k.hourly ?? 8, 1, 99), kw: num(k.weekly ?? 1, 1, 52), km: num(k.monthly ?? 1, 1, 36),
+      pause: sel([['', 'kein Pausentag'], ...WD.map((t, i) => [i, t])], as.pauseDay ?? ''),
+      label: sel([['hourly', 'stündlich'], ['weekly', 'wöchentlich'], ['monthly', 'monatlich']], 'hourly'),
+    };
+    const out = h('pre', { class: 'log', hidden: true });
+    const save = () => {
+      const body = { action: 'plan', plan: { hourly: f.hourly.checked, hourlyMinute: Number(f.hourlyMinute.value), weekly: f.weekly.checked, weeklyDay: Number(f.weeklyDay.value), weeklyTime: f.weeklyTime.value,
+        monthly: f.monthly.checked, monthlyDay: Number(f.monthlyDay.value), monthlyTime: f.monthlyTime.value } };
+      if (sc.managed) Object.assign(body, { keep: { hourly: Number(f.kh.value), weekly: Number(f.kw.value), monthly: Number(f.km.value) }, pauseDay: f.pause.value === '' ? null : Number(f.pause.value) });
+      return post(body, 'Planung gespeichert.');
+    };
+    const dry = async () => { out.hidden = false; out.textContent = 'Läuft …'; try { out.textContent = (await ctx.api('POST', `/api/hosts/${host.id}/snapshots`, { action: 'dryrun', label: f.label.value })).text || '(keine Ausgabe)'; } catch (e) { out.textContent = e.message; } };
+    return h('details', { class: 'panel2' }, h('summary', {}, 'Planung ändern'),
+      h('p', { class: 'sub' }, sc.mode === 'tool' ? 'Die Zeitpunkte gelten für die Läufe, die das Tool auslöst.' : 'Achtung: Solange der Cron auf dem Host auslöst, gelten dessen Zeiten. Die Zeitpunkte hier wirken erst, wenn das Tool übernimmt. Aufbewahrung und Pausentag gelten immer.'),
+      h('div', { class: 'f' }, h('span', {}, 'Zeitpunkte'),
+        h('div', { class: 'row' }, h('label', {}, f.hourly, ' stündlich, jeweils zur Minute '), f.hourlyMinute),
+        h('div', { class: 'row' }, h('label', {}, f.weekly, ' wöchentlich, '), f.weeklyDay, ' um ', f.weeklyTime),
+        h('div', { class: 'row' }, h('label', {}, f.monthly, ' monatlich, am Tag '), f.monthlyDay, ' um ', f.monthlyTime, h('span', { class: 'sub' }, ' (fällt er auf den Pausentag, am Folgetag)'))),
+      sc.managed
+        ? h('div', { class: 'f' }, h('span', {}, 'Aufbewahrung (so viele Snapshots bleiben je Gast) und Pausentag'),
+            h('div', { class: 'row' }, 'stündlich ', f.kh, ' wöchentlich ', f.kw, ' monatlich ', f.km), h('div', { class: 'row' }, 'Pausentag ', f.pause))
+        : h('div', { class: 'finding info' }, h('div', { class: 'sub' }, 'Aufbewahrung und Pausentag stehen bei diesem Host noch fest im Wrapper. Zum Ändern: „Skript aktualisieren“ mit Haken „Snapshots auslösen erlauben“. Das installiert den verwalteten Wrapper (der alte bleibt als Sicherung erhalten, seine Werte werden übernommen).'),
+            hostObj ? h('div', { class: 'actions' }, h('button', { onclick: () => ctx.openUpdate(hostObj) }, 'Wrapper installieren')) : null),
+      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: save }, 'Speichern'), sc.managed ? [h('span', { class: 'spacer' }), 'Probelauf ohne Wirkung: ', f.label, h('button', { onclick: dry }, 'Probelauf')] : null), out);
+  })();
+
   const run = host.runningJob;
   const runBox = run ? h('div', { class: 'finding ok' }, h('b', {}, `Ein Backup-Lauf läuft gerade (gestartet ${fmtDT(run.start)}, ${ago(run.start, now)}).`), h('div', { class: 'sub' }, 'Die Ergebnisse dieses Laufs erscheinen hier, sobald er beendet ist. Die roten Hinweise unten stammen aus dem davor beendeten Lauf.')) : null;
   const lr = host.lastRun;
@@ -81,7 +117,7 @@ function hostPanel(b, host, data) {
       h('td', {}, t.parsed ? [`${t.ok} gesichert${t.failed ? `, ${t.failed} fehlgeschlagen` : ''}${t.interrupted ? `, ${t.interrupted} unterbrochen` : ''}`, t.summary.cause === 'verbindung' ? h('div', { class: 'sub bad' }, 'Verbindung zum PBS') : null] : h('span', { class: 'sub' }, t.running ? 'läuft …' : 'Protokoll wird gelesen …')),
       h('td', {}, t.guests.length ? h('details', {}, h('summary', {}, `${t.guests.length} Gäste`), h('ul', { class: 'plain' }, t.guests.map((x) => h('li', {}, resultPill(x.result), ` ${x.vmid} ${x.name ?? ''}`, x.seconds ? h('span', { class: 'sub' }, ` · ${fmtMin(Math.max(1, Math.round(x.seconds / 60)))}`) : '', x.note ? h('div', { class: 'sub bad' }, x.note) : null, x.detail ? h('details', {}, h('summary', {}, 'Protokollzeilen'), h('pre', { class: 'log' }, x.detail.replace(/ \| /g, '\n'))) : null)))) : '')))))) : h('p', { class: 'sub' }, 'Noch keine Backup-Läufe auf diesem Host gelesen. Die Aufgabenliste von Proxmox reicht einige Wochen zurück.');
 
-  return h('section', { class: 'panel' }, head, runBox, lrBox, asBox, ctlBox,
+  return h('section', { class: 'panel' }, head, runBox, lrBox, asBox, ctlBox, planBox,
     h('h3', {}, `Gäste (${host.guests.length})`), host.guests.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['ID', 'Gast', 'Snapshots (vorhanden / vorgesehen)', 'Letztes Backup', 'Hinweise'].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Keine Gäste gelesen.'),
     h('h3', {}, 'Backup-Läufe'), runs);
 }

@@ -235,3 +235,37 @@ test('Snapshots: lässt sich der Cron nicht ausschalten, bleibt es beim Cron und
   await assert.rejects(() => engine.setSnapMode('pve', 'tool'), /ließ sich nicht ausschalten/);
   assert.equal(engine.snapCtl('pve').mode, 'cron');
 });
+
+test('Snapshot-Planung: Zeitpunkte im Tool, Aufbewahrung und Pausentag über den verwalteten Wrapper', async () => {
+  const { engine, world } = setup();
+  await engine.pollHost('pve');
+  const as = () => engine.db.getAutosnap('pve');
+  assert.equal(as().managed, true);
+  assert.deepEqual(as().keep, { hourly: 8, weekly: 1, monthly: 1 });
+  await engine.setSnapPlan('pve', { plan: { hourlyMinute: 30, weeklyDay: 6, weeklyTime: '03:00' }, keep: { hourly: 12, monthly: 3 }, pauseDay: null });
+  assert.deepEqual(as().keep, { hourly: 12, weekly: 1, monthly: 3 });
+  assert.equal(as().pauseDay, null, 'kein Pausentag');
+  assert.equal(engine.snapCtl('pve').plan.hourlyMinute, 30);
+  assert.equal(engine.snapCtl('pve').plan.weeklyDay, 6);
+  assert.ok(world.state.get('pve').snapCalls.some((c) => c === 'snap-conf 12 1 3 0 1'));
+  await engine.setSnapPlan('pve', { pauseDay: 0 });
+  assert.equal(as().pauseDay, 0, 'Sonntag als Pausentag');
+  await assert.rejects(() => engine.setSnapPlan('pve', { keep: { hourly: 0 } }), /erlaubt sind 1 bis 99/);
+  await assert.rejects(() => engine.setSnapPlan('pve', { plan: { hourlyMinute: 61 } }), /erlaubt sind 0 bis 59/);
+  await assert.rejects(() => engine.setSnapPlan('pve', { plan: { monthlyDay: 31 } }), /erlaubt sind 1 bis 28/);
+  assert.match(await engine.snapDryRun('pve', 'hourly'), /Container/);
+  await engine.pollHost('router');
+  await assert.rejects(() => engine.setSnapPlan('router', { plan: { hourlyMinute: 10 } }), /nicht freigegeben/);
+});
+
+test('Snapshot-Planung: neue Zeitpunkte bestimmen, wann das Tool auslöst', async () => {
+  const { engine, world, advance } = setup(new Date(2026, 10, 3, 9, 28)); // Dienstag 09:28
+  await engine.pollHost('pve');
+  await engine.setSnapPlan('pve', { plan: { hourlyMinute: 30 } });
+  await engine.setSnapMode('pve', 'tool');
+  world.state.get('pve').snapCalls.length = 0;
+  await engine.tickHost('pve');
+  assert.equal(world.state.get('pve').snapCalls.filter((c) => c === 'snap-run hourly').length, 0, '09:28 ist vor 09:30: der letzte Slot (08:30) liegt über 55 Minuten zurück');
+  advance(4); await engine.pollHost('pve'); await engine.tickHost('pve'); // 09:32
+  assert.equal(world.state.get('pve').snapCalls.filter((c) => c === 'snap-run hourly').length, 1);
+});

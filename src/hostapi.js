@@ -63,6 +63,17 @@ export class HostClient {
     return { ok: r.code === 0, code: r.code, text: `${r.stdout}${r.stderr}`.trim().slice(-600) };
   }
   async snapSwitch(on) { const r = await this.t.run(`snap-switch ${on ? 'on' : 'off'}`, 20000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Schalter nicht gesetzt'); }
+  /** Aufbewahrung und Pausentag in /etc/autosnap.conf schreiben (verwalteter Wrapper). pauseDay: 0 = keiner, 1–7 = Mo–So. */
+  async snapConf({ keepHourly, keepWeekly, keepMonthly, pauseDay, monthlyDay }) {
+    const r = await this.t.run(`snap-conf ${keepHourly} ${keepWeekly} ${keepMonthly} ${pauseDay} ${monthlyDay}`, 20000);
+    if (r.code !== 0) throw new Error(r.stderr.trim() || 'Einstellungen nicht geschrieben');
+  }
+  /** Probelauf ohne Wirkung. */
+  async snapDryRun(label) {
+    const r = await this.t.run(`snap-dryrun ${label}`, 120000);
+    if (r.code !== 0 && !r.stdout.trim()) throw new Error(r.stderr.trim() || 'Probelauf fehlgeschlagen');
+    return `${r.stdout}${r.stderr}`.trim().slice(-4000);
+  }
   async snapCron(action) { const r = await this.t.run(`snap-cron ${action}`, 20000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Cron nicht geändert'); return r.stdout.trim(); }
 
   /** Kernel-Meldungen zu Verbindungsfehlern der letzten 48 h (braucht Prüfskript ab Version 5). */

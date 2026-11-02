@@ -122,3 +122,18 @@ test('Lauf-Zusammenfassung: Ursache „Verbindung“ erst, wenn die meisten Fehl
   assert.equal(summarizeRun([{ result: 'failed', cause: 'verbindung' }, { result: 'ok' }]).cause, null, 'ein einzelner Fehlschlag macht noch keinen Verbindungsausfall');
   assert.equal(failureCause('alles gut'), 'sonstiges');
 });
+
+test('autosnap: verwalteter Wrapper v2 liest Aufbewahrung, Pausentag und Auswahl aus /etc/autosnap.conf', async () => {
+  const { parseAutosnap } = await import('../src/backups.js');
+  const a = parseAutosnap('schalter: an\n== wrapper\n#!/bin/bash\n# autosnap-run v2\nKEEP_HOURLY=8\nPAUSE_DAY=1\n== cron\n\n== conf\nKEEP_HOURLY=12\nKEEP_WEEKLY=2\nKEEP_MONTHLY=3\nPAUSE_DAY=7\nMONTHLY_DAY=5\nTAG=meintag\nONLY_RUNNING=1\n== log\n');
+  assert.equal(a.managed, true);
+  assert.deepEqual(a.keep, { hourly: 12, weekly: 2, monthly: 3 });
+  assert.equal(a.pauseDay, 0, 'Sonntag (7) wird zu 0');
+  assert.equal(a.tag, 'meintag');
+  assert.equal(a.monthlyDay, 5);
+  assert.equal(a.onlyRunning, true);
+  assert.equal(parseAutosnap('schalter: an\n== wrapper\n# autosnap-run v2\n== conf\nPAUSE_DAY=0\n== log\n').pauseDay, null, '0 = kein Pausentag');
+  const old = parseAutosnap('schalter: an\n== wrapper\nPAUSE_DAY=1\ncase "$L" in\n    hourly)  KEEP=8 ;;\n== cron\n== log\n');
+  assert.equal(old.managed, false);
+  assert.equal(old.keep.hourly, 8);
+});

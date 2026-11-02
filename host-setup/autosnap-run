@@ -1,0 +1,82 @@
+#!/bin/bash
+# autosnap-run v2 (wird von pve-tools verwaltet)
+#
+# Zweck:   Legt mit proxmox-autosnap.py Snapshots an und löscht alte nach der Aufbewahrung.
+# Aufruf:  autosnap-run hourly|weekly|monthly
+#          Probelauf ohne Wirkung:  DRYRUN=1 autosnap-run hourly
+#          FORCE=1 umgeht Pausentag und Datumsfenster (nicht den Hauptschalter).
+# Wann:    Gestartet vom Tool (Prüfskript, Befehl snap-run) oder, im Cron-Modus, von /etc/cron.d/proxmox-autosnap.
+# Werte:   Stehen in /etc/autosnap.conf (schreibt das Tool). Fehlt die Datei oder ein Wert, gelten die Standardwerte unten.
+#          Datei: eine Zeile je Wert, SCHLUESSEL=WERT, z. B. KEEP_HOURLY=8
+# Schalter: Existiert /etc/autosnap.disabled, werden keine Snapshots angelegt.
+
+FLAG=/etc/autosnap.disabled
+CONF=/etc/autosnap.conf
+# Standardwerte (so liefen die bisherigen Skripte)
+KEEP_HOURLY=8
+KEEP_WEEKLY=1
+KEEP_MONTHLY=1
+PAUSE_DAY=1        # 1 = Montag … 7 = Sonntag (date +%u), 0 = kein Pausentag
+MONTHLY_DAY=1      # Tag im Monat für den Monatslauf; ist der Folgetag nach dem Pausentag, wird dort nachgeholt
+TAG="autosnap"
+ONLY_RUNNING=0     # 1 = nur laufende Container mit dem Tag (pve), 0 = alle mit dem Tag (router)
+LABEL="$1"
+
+if [ -r "$CONF" ]; then
+    while IFS='=' read -r k v; do
+        case "$k" in
+            KEEP_HOURLY|KEEP_WEEKLY|KEEP_MONTHLY|PAUSE_DAY|MONTHLY_DAY|ONLY_RUNNING)
+                [[ "$v" =~ ^[0-9]{1,3}$ ]] && printf -v "$k" '%s' "$((10#$v))" ;;
+            TAG)
+                [[ "$v" =~ ^[A-Za-z0-9_-]{1,32}$ ]] && TAG="$v" ;;
+        esac
+    done < "$CONF"
+fi
+
+if [ -e "$FLAG" ] && [ -z "$DRYRUN" ]; then
+    logger -t autosnap "übersprungen ($LABEL): Snapshots sind ausgeschaltet"
+    exit 0
+fi
+
+# Pausentag (FORCE=1 umgeht die Zeitregeln, nicht aber den Hauptschalter)
+if [ -z "$FORCE" ] && [ "$PAUSE_DAY" != 0 ] && [ "$(date +%u)" = "$PAUSE_DAY" ]; then
+    exit 0
+fi
+
+case "$LABEL" in
+    hourly)  KEEP=$KEEP_HOURLY ;;
+    weekly)  KEEP=$KEEP_WEEKLY ;;
+    monthly) KEEP=$KEEP_MONTHLY
+             if [ -z "$FORCE" ]; then
+                 day=$((10#$(date +%d)))
+                 ok=
+                 [ "$day" = "$MONTHLY_DAY" ] && ok=1
+                 # Fiel der Monatstag auf den Pausentag, wird am Folgetag nachgeholt
+                 [ "$PAUSE_DAY" != 0 ] && [ "$day" = "$((MONTHLY_DAY + 1))" ] && [ "$(date -d yesterday +%u)" = "$PAUSE_DAY" ] && ok=1
+                 [ -n "$ok" ] || exit 0
+             fi ;;
+    *) echo "Aufruf: $0 hourly|weekly|monthly" >&2; exit 2 ;;
+esac
+
+SNAP=/usr/local/sbin/proxmox-autosnap.py
+
+if [ "$ONLY_RUNNING" = 1 ]; then
+    # Nur laufende LXCs mit dem Tag
+    IDS=""
+    for id in $(pct list | awk 'NR>1 && $2=="running" {print $1}'); do
+        case ";$(pct config "$id" | awk '/^tags:/{print $2}');" in
+            *";$TAG;"*) IDS="$IDS $id" ;;
+        esac
+    done
+    [ -z "$IDS" ] && exit 0
+    OPTS="--autosnap --vmid $IDS --label $LABEL --keep $KEEP --check-free-space --mute"
+else
+    OPTS="--autosnap --tags $TAG --label $LABEL --keep $KEEP --check-free-space --mute"
+fi
+
+if [ -n "$DRYRUN" ]; then
+    echo "Wrapper: autosnap-run v2, Bezeichnung $LABEL, Aufbewahrung $KEEP, Auswahl: $([ "$ONLY_RUNNING" = 1 ] && echo "laufende Container mit Tag $TAG:$IDS" || echo "alle mit Tag $TAG")"
+    $SNAP $OPTS --dryrun
+else
+    $SNAP $OPTS 2>&1 | logger -t autosnap
+fi
