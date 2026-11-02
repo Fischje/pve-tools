@@ -1,5 +1,6 @@
 // Steuerung: fragt die Hosts ab, speichert Messwerte, wertet Testergebnisse aus und startet/bricht Tests nach Zeitplan.
 import { rateKernel } from './kernel.js';
+import { Orchestrator } from './orchestrator.js';
 import { DEFAULT_SETTINGS, decide, canStartManual, advanceProgress, dayKey } from './schedule.js';
 import { rate } from './rating.js';
 import { dueSnapshots, SNAP_DEFAULTS, LABEL_DE, planOf, cleanPlan } from './snapshots.js';
@@ -22,6 +23,7 @@ export class Engine {
   constructor({ db, hosts, makeClient, now = () => new Date(), log = () => {} }) {
     this.db = db; this.hosts = hosts; this.makeClient = makeClient; this.now = now; this.log = log;
     this.clients = new Map(); this.lastDecision = new Map(); this.busy = new Set();
+    this.orch = new Orchestrator(this);
   }
 
   addHost(h) { if (this.hosts.some((x) => x.id === h.id)) throw new Error('Kennung existiert schon'); this.hosts.push(h); }
@@ -171,7 +173,7 @@ export class Engine {
       };
     });
     return {
-      reachable, uptimeSec, zfsBusy: (hs?.pools ?? []).some((p) => p.busy), disks,
+      reachable, uptimeSec, zfsBusy: (hs?.pools ?? []).some((p) => p.busy), backupBusy: this.orch.isBusy(hostId), disks,
       todayRuns: { short: runs.some((r) => r.kind === 'short'), long: runs.some((r) => r.kind === 'long' || r.kind === 'select') },
       approval: { skipDate: ap.skipDate ?? null, snoozeUntil: ap.snoozeUntil ?? null, goNow: !!ap.goAt && dayKey(ap.goAt) === dayKey(now) },
     };
@@ -184,6 +186,7 @@ export class Engine {
       this.busy.add(host.id);
       try { await this.tickHost(host.id); } catch (e) { this.log(`Fehler bei ${host.id}: ${e.stack ?? e.message}`); } finally { this.busy.delete(host.id); }
     }
+    try { await this.orch.tick(); } catch (e) { this.log(`Backup-Steuerung: ${e.stack ?? e.message}`); }
   }
 
   async tickHost(hostId) {

@@ -182,6 +182,21 @@ const lv = (l) => ['ok', 'info', 'watch', 'replace'].indexOf(l);
  * Es wird nur beobachtet. Ob ein Gast ein Backup bekommen soll, weiß das Tool in dieser Stufe nicht (die Ausschlussliste steht im Orchestrator),
  * deshalb gibt es nur dann einen Hinweis, wenn ein Gast früher gesichert wurde und jetzt zu lange nicht mehr.
  */
+const shapeJob = (j) => (j ? { ...j, startedAt: iso(j.startedAt), endedAt: iso(j.endedAt), hosts: j.hosts.map((h) => ({ ...h, since: iso(h.since), startedAt: iso(h.startedAt) })) } : null);
+/** Zustand der Backup-Steuerung (Einstellungen, Hosts mit Gästen und Auswahl, laufender und letzter Lauf). */
+function backupControl(engine) {
+  const o = engine.orch, s = o.settings(), db = engine.db;
+  const label = (id) => engine.hosts.find((h) => h.id === id)?.label ?? id;
+  return {
+    settings: { mode: s.mode, pbsHostId: s.pbsHostId, storage: s.storage, waitAfterBootMin: s.waitAfterBootMin, shutdown: s.shutdown, hostWaitMin: s.hostWaitMin },
+    hostChoices: engine.hosts.map((h) => ({ id: h.id, label: h.label ?? h.id, kind: h.kind ?? 'fest' })),
+    pbs: { id: s.pbsHostId, label: label(s.pbsHostId), reachable: !!db.getHostState(s.pbsHostId)?.reachable, rightShutdown: engine.hostRights(s.pbsHostId).includes('herunterfahren') },
+    hosts: o.order(s).map((id) => ({ id, label: label(id), right: engine.hostRights(id).includes('backup-starten'), reachable: !!db.getHostState(id)?.reachable, ...o.selection(id, s),
+      guests: db.guestsOf(id).filter((g) => !g.template).map((g) => ({ vmid: g.vmid, name: g.name, type: g.type, status: g.status })) })),
+    job: shapeJob(o.job()), last: shapeJob(o.lastJob()),
+  };
+}
+
 /** Zustand der Snapshot-Auslösung durch das Tool für die Oberfläche. */
 function snapControl(engine, hostId, as, now) {
   const ctl = engine.snapCtl(hostId), rights = engine.hostRights(hostId), last = engine.snapLast(hostId);
@@ -253,7 +268,7 @@ export function backupOverview(engine) {
   const allTasks = hosts.flatMap((h) => h.tasks.map((x) => ({ ...x, hostId: h.id, hostLabel: h.label }))).filter((x) => x.start).sort((a, b) => b.start.localeCompare(a.start));
   const guestsAll = hosts.flatMap((h) => h.guests.map((g) => ({ ...g, hostId: h.id })));
   return {
-    now: iso(now), hosts, lastRun: allTasks[0] ?? null,
+    now: iso(now), hosts, lastRun: allTasks[0] ?? null, control: backupControl(engine),
     kpi: {
       failedCause: hosts.some((h) => h.lastRun?.summary?.cause === 'verbindung') ? 'verbindung' : null, guests: guestsAll.length, snapshotsOn: hosts.filter((h) => h.autosnap?.enabled).length, snapshotsOff: hosts.filter((h) => h.autosnap?.known && !h.autosnap.enabled).length,
       problems: guestsAll.filter((g) => lv(g.level) >= lv('watch')).length, failedBackups: guestsAll.filter((g) => g.backup?.result === 'failed').length,

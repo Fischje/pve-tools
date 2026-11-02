@@ -16,7 +16,7 @@ bleibt der Kern unberührt: dort liegen nur ein eingeschränkter SSH-Zugang und 
 - **Verlauf:** Messwerte in SQLite, damit sichtbar wird, ob ein Fehlerwert noch steigt.
 - **Hosts aus der Oberfläche einrichten:** Assistent, der den eingeschränkten Zugang auf dem Host anlegt (einmalig mit dem root-Passwort, das nicht gespeichert wird). Kein Zugriff auf die Befehlszeile des Hosts nötig.
 - **Verbindungsfehler erkennen:** Steigt der CRC-Zähler einer Platte oder meldet der Kernel SATA-/NVMe-Fehler (`ata… bus error`, Link auf 1,5 Gbps zurückgefallen), warnt das Tool per Mail. Das zeigt meist ein Kabel-, Stecker- oder Stromproblem, bevor ein Backup daran scheitert.
-- **Backups und Snapshots beobachten:** Gäste, Snapshot-Stand je Gast (nach deinen proxmox-autosnap-Skripten), Backup-Läufe mit Ergebnis je Gast und Protokoll. Snapshots kann das Tool auch selbst auslösen (statt Cron auf dem Host), Backups folgen. Siehe [docs/BACKUP-STEUERUNG.md](docs/BACKUP-STEUERUNG.md).
+- **Backups und Snapshots beobachten:** Gäste, Snapshot-Stand je Gast (nach deinen proxmox-autosnap-Skripten), Backup-Läufe mit Ergebnis je Gast und Protokoll. Snapshots und den Backup-Lauf (inkl. Herunterfahren des PBS nur nach vollem Erfolg) kann das Tool auch selbst steuern. Siehe [docs/BACKUP-STEUERUNG.md](docs/BACKUP-STEUERUNG.md).
 - **E-Mail-Benachrichtigung:** eine Mail pro Änderung, wenn eine Platte „Bald tauschen“/„Kritisch“ wird, ein ZFS-Pool Fehler meldet oder ein Selbsttest fehlschlägt (eigener SMTP-Client, STARTTLS und SSL/TLS, ohne Abhängigkeiten).
 - **Prüfskript auf den Hosts aktualisieren:** Die Oberfläche zeigt veraltete Hosts und aktualisiert sie per Klick (einmalig mit dem root-Passwort).
 - **Passwort in der Oberfläche** setzbar. Erreichbar nur aus dem lokalen Netz.
@@ -43,6 +43,7 @@ npm run demo        # Demo mit simulierten Hosts
 | `src/server.js`, `src/auth.js`, `src/service.js` | Webserver, Passwort, Aufbereitung für die Oberfläche |
 | `src/kernel.js` | Auswertung der Kernel-Meldungen zu SATA-/NVMe-Verbindungsfehlern |
 | `host-setup/autosnap-run` | Verwalteter Wrapper für proxmox-autosnap (liest /etc/autosnap.conf) |
+| `src/orchestrator.js` | Backup-Lauf durch das Tool: Boot erkennen, Hosts nacheinander sichern, über die Aufgabenliste warten, PBS bei Erfolg herunterfahren |
 | `src/snapshots.js` | Zeitplan der Snapshots, die das Tool auslöst (fällig, nachholen, Pausentag) |
 | `src/backups.js` | Auswertung von Gästen, Snapshots, vzdump-Läufen und proxmox-autosnap |
 | `src/smtp.js`, `src/notify.js` | Mailversand und die Regeln, wann eine Mail kommt |

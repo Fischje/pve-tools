@@ -143,6 +143,7 @@ export function decide(now, s, st) {
   }
   if (!win.open) return none(win.reason);
   if (st.zfsBusy) return none('ZFS-Scrub oder Resilver läuft');
+  if (st.backupBusy) return none('Ein Backup läuft');
 
   if (s.mode === 'manuell') {
     const ap = st.approval ?? {};
@@ -187,6 +188,7 @@ export function canStartManual(now, s, st, serial, type) {
   if (!win.open) return { ok: false, reason: win.reason };
   if (st.disks.some((d) => d.running)) return { ok: false, reason: 'Auf diesem Host läuft schon ein Test' };
   if (st.zfsBusy) return { ok: false, reason: 'ZFS-Scrub oder Resilver läuft' };
+  if (st.backupBusy) return { ok: false, reason: 'Ein Backup läuft' };
   const d = st.disks.find((x) => x.serial === serial);
   if (!d) return { ok: false, reason: 'Platte unbekannt' };
   if (type === 'short') {

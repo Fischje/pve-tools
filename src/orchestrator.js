@@ -45,7 +45,7 @@ export function cleanBackupSettings(input, hostIds = []) {
 }
 
 export class Orchestrator {
-  constructor(engine) { this.engine = engine; this.busy = false; }
+  constructor(engine) { this.engine = engine; this.running = false; }
   get db() { return this.engine.db; }
   now() { return this.engine.now(); }
   parse(key, d) { try { return JSON.parse(this.db.getSetting(key) ?? 'null') ?? d; } catch { return d; } }
@@ -89,7 +89,7 @@ export class Orchestrator {
   lastJob() { return this.parse(LAST_KEY, null); }
   saveJob(job) { this.db.setSetting(JOB_KEY, JSON.stringify(job)); }
   /** Läuft auf diesem Host gerade ein vom Tool gestartetes oder übernommenes Backup? (Dann keine Platten-Tests.) */
-  busy(hostId) { const j = this.job(); return !!j && j.phase === 'läuft' && j.hosts.some((h) => h.id === hostId && h.state === 'läuft'); }
+  isBusy(hostId) { const j = this.job(); return !!j && j.phase === 'läuft' && j.hosts.some((h) => h.id === hostId && h.state === 'läuft'); }
 
   /** Läuft jede Minute (aus dem Takt der Engine). */
   async tick() {
@@ -107,7 +107,7 @@ export class Orchestrator {
       if (up < s.waitAfterBootMin) return;
       const last = Number(this.db.getSetting(BOOT_KEY) ?? 0);
       if (Math.abs(boot - last) < 10 * MIN) return; // dieser Boot wurde schon behandelt
-      this.begin(s, { bootAt: Math.round(boot), manual: false });
+      await this.advance(this.begin(s, { bootAt: Math.round(boot), manual: false }), s);
     } catch (e) { this.engine.log(`Backup-Steuerung: ${e.stack ?? e.message}`); } finally { this.running = false; }
   }
 
@@ -150,6 +150,7 @@ export class Orchestrator {
     const sel = this.selection(cur.id, s);
     try {
       if (cur.state === 'wartet') {
+        if (!cur.activeAt) { cur.activeAt = now; cur.since = now; } // die Wartezeit zählt ab dem Moment, in dem der Host an der Reihe ist
         const hs = this.db.getHostState(cur.id);
         const problem = !hs?.reachable ? 'Host nicht erreichbar' : !this.engine.hostRights(cur.id).includes('backup-starten') ? 'Recht „Backups starten“ fehlt' : null;
         let storageOk = false;

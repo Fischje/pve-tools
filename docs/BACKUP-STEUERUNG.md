@@ -1,6 +1,6 @@
 # Backup- und Snapshot-Steuerung
 
-Stand: Stufe 1 (Beobachten) und Stufe 2 (Snapshots auslösen) sind umgesetzt, Stufe 3 (Backup-Lauf) ist Plan. Ziel: Das Tool (läuft im LXC auf dem immer eingeschalteten `router`) überwacht Backups und
+Stand: Stufe 1 (Beobachten), Stufe 2 (Snapshots auslösen und planen) und Stufe 3 (Backup-Lauf) sind umgesetzt. Ziel: Das Tool (läuft im LXC auf dem immer eingeschalteten `router`) überwacht Backups und
 Snapshots, die heute Skripte erledigen, und übernimmt später die Steuerung. Parameter lassen sich dann in der Oberfläche ändern.
 
 ## So ist es heute eingerichtet (nach deinen Skripten)
@@ -71,20 +71,52 @@ Das Tool bekommt kein Löschrecht.
   Pausentag, Tag, nur laufende) werden einmalig in `/etc/autosnap.conf` übernommen. Zurück geht es, indem ihr die Sicherung wieder nach `autosnap-run` kopiert.
 - **Offen:** Die Auswahl der Gäste (Tag `autosnap`) lässt sich noch nicht in der Oberfläche setzen. Das bräuchte ein weiteres Schreibrecht.
 
-## Stufe 3: Backup-Lauf durch das Tool (Plan)
+## Stufe 3: Backup-Lauf durch das Tool (umgesetzt)
 
-Das Tool ersetzt den Orchestrator auf dem PBS und läuft auf dem immer eingeschalteten `router`:
-- Es erkennt, dass der PBS hochgefahren ist (wie bei den Plattentests), wartet die eingestellte Zeit und startet die Backups host für host.
-- Jeder Lauf wird über Aufgabenliste und Protokoll geprüft (wie in Stufe 1).
-- **Der PBS wird nur heruntergefahren, wenn alle Backups erfolgreich waren** (einstellbar an/aus).
-- Einstellungen in der Oberfläche: Auswahl der Gäste je Host (alle / alle außer / nur diese), Wartezeit nach dem Hochfahren, Herunterfahren an/aus.
-- Neue, einzeln freigebbare Rechte im Prüfskript: `vzdump` starten, auf dem PBS `poweroff`. Nur feste Befehle mit geprüften Argumenten, keine freie Shell.
-- Vor dem Umschalten wird der Cron-Eintrag des alten Orchestrators auf dem PBS ausgeschaltet, damit nie zwei Steuerungen gleichzeitig laufen.
-- Zuerst ein Trockenlauf („würde sichern: …“), dann parallel beobachtend, dann scharf.
+Das Tool ersetzt den Orchestrator auf dem PBS (`pbs-run-backups.sh`). Es läuft auf dem immer eingeschalteten `router`.
+
+**Was am alten Skript auffiel** (und im Tool anders ist):
+- `ssh … "vzdump … &"` blockiert, bis vzdump fertig ist. Das „Warten“ danach prüft mit `pvesh … --type … --status …`, das auf PVE 9 ungültig ist, und meldet deshalb immer sofort „fertig“.
+  Bricht die SSH-Verbindung ab, weiß das Skript nichts mehr vom Backup.
+- `systemctl poweroff` kommt immer, auch bei fehlgeschlagenen Backups.
+- Im Tool: vzdump läuft als eigener systemd-Dienst auf dem Host (überlebt einen SSH-Abbruch), das Tool wartet über die **Aufgabenliste des Hosts** (UPID, Status, Protokoll je Gast)
+  und fährt den PBS **nur bei vollständigem Erfolg** herunter.
+
+**Ablauf**
+1. Der PBS (Host-Art „manuell“, wird von Hand oder automatisch eingeschaltet) fährt hoch. Das Tool erkennt den neuen Boot über die Laufzeit.
+2. Nach der **Wartezeit** (Voreinstellung 20 Minuten wie bisher) beginnt der Lauf. Pro Boot gibt es genau einen Lauf.
+3. Host für Host, in der festen Reihenfolge (Voreinstellung wie im alten Skript: `router`, dann `pve`): Ist der Host nicht erreichbar oder der Speicher `pbs` dort nicht aktiv, wartet das Tool
+   (höchstens „Wartezeit auf einen Host“, Voreinstellung 30 Minuten) und überspringt den Host dann mit Fehler. Läuft auf dem Host schon ein vzdump (etwa vom alten Skript), wird er **übernommen**
+   und nicht doppelt gestartet. Sonst startet das Tool `vzdump --all 1 [--exclude …] --storage pbs --mode snapshot --compress zstd`.
+4. Das Tool prüft jede Minute die Aufgabenliste. Erfolgreich ist ein Host, wenn der Task `OK` (oder `WARNINGS`) meldet **und** kein Gast fehlgeschlagen ist.
+5. Am Ende: Alles erfolgreich → Mail „Lauf abgeschlossen“ und der PBS wird heruntergefahren (einstellbar). Sonst bleibt der PBS an, und eine Mail nennt Host, fehlgeschlagene Gäste und, wenn erkennbar,
+   die Ursache („Verbindung zum PBS fehlte oder brach ab“).
+6. Während auf einem Host ein vom Tool gesteuertes Backup läuft, startet das Tool dort keine Platten-Tests.
+
+**Einstellungen** (Reiter „Backups & Snapshots“, „Backup-Lauf“): Betriebsart „beobachten“ oder „steuern“, PBS-Host, Speichername, Wartezeiten, Herunterfahren an/aus, je Host die Auswahl der Gäste.
+Gespeichert wird eine **Ausschlussliste** (wie `--all --exclude`), deshalb werden neue Gäste automatisch mitgesichert. Voreinstellung für `pve`: Ausschluss von 109, 112, 113, 114, 116, 119, 117, 159, 161, 171
+(aus dem alten Skript übernommen).
+
+**Neue Rechte** (nur mit dem root-Passwort freigebbar, Prüfskript Version 8): `backup-starten` auf den PVE-Hosts (Befehl `backup-start <speicher> all|exclude <ids>|only <ids>`, feste Parameter, nur Ziffern in den Listen,
+fester Dienstname, damit nie zwei Läufe gleichzeitig starten) und `herunterfahren` auf dem PBS (Befehl `poweroff`, 20 Sekunden Verzögerung). Lesend ohne Recht: `storage-status <name>`.
+
+**Umstellen (empfohlene Reihenfolge)**
+1. „Skript aktualisieren“ bei `router`, `pve` und `pbs`: Haken „Backups starten erlauben“ bei den PVE-Hosts, „Herunterfahren erlauben“ beim PBS.
+2. In „Backup-Lauf“ den PBS-Host prüfen, die Gäste-Auswahl ansehen, „Speichern und Trockenlauf“. Der Trockenlauf startet nichts und meldet Probleme (Recht fehlt, Host/Speicher nicht erreichbar).
+3. Mit der Betriebsart „beobachten“ lassen, bis ein Lauf des alten Orchestrators durch ist: Das Tool zeigt ihn wie bisher in „Backup-Läufe“.
+4. **Den alten Orchestrator auf dem PBS abschalten** (Cron `@reboot`, z. B. mit `crontab -e` auskommentieren). Er soll nicht neben dem Tool laufen.
+5. Betriebsart auf „Das Tool steuert“. Beim Umschalten gilt der gerade laufende Boot des PBS als erledigt, es startet also nicht sofort ein Lauf. Der nächste Boot löst den ersten Lauf aus.
+   Zum Testen gibt es „Jetzt Backup starten“ (PBS muss laufen).
+6. Danach das root-Passwort aus `pbs-run-backups.sh` auf den Hosts ändern und das Skript löschen.
+
+**Grenzen**
+- Das Tool schaltet den PBS nicht ein (Wake-on-LAN, Zeitschaltuhr oder BIOS bleiben Sache der Umgebung). Das ließe sich später ergänzen.
+- „Abbrechen“ im Tool beendet nur die Steuerung. Ein schon laufendes vzdump läuft auf dem Host weiter.
+- Fällt der LXC `pve-tools` aus, gibt es weder Backup-Läufe noch Snapshots. Die Mail-Überwachung der Läufe zeigt nur, was das Tool selbst gesehen hat.
 
 ## Sicherheitsmodell
 
-- Fähigkeitsgruppen je Host, einzeln einschaltbar über „Neu einrichten“ (mit dem root-Passwort): `platten` und `beobachten` (lesend, jetzt schon), später `snapshots-verwalten`, `backup-starten`, `herunterfahren`.
+- Fähigkeitsgruppen je Host, einzeln einschaltbar über „Neu einrichten“ (mit dem root-Passwort): `platten` und `beobachten` (lesend, jetzt schon), `snapshots`, `backup-starten` und `herunterfahren` (Rechtegruppen, einzeln freigebbar).
 - Nur feste Befehle, IDs nur Ziffern, Namen aus Positivlisten, keine freie Shell.
 - Das Tool löscht nie selbst Snapshots. Das erledigt weiter proxmox-autosnap mit eigenen Regeln.
 

@@ -180,12 +180,12 @@ function mailPanel() {
     user: h('input', { type: 'text', value: c.user, autocomplete: 'off' }), pw: h('input', { type: 'password', autocomplete: 'new-password', placeholder: m.passwordSet ? 'gespeichert (leer lassen = unverändert)' : '' }),
     from: h('input', { type: 'text', value: c.from, placeholder: 'platten@example.org' }), to: h('input', { type: 'text', value: c.to, placeholder: 'du@example.org' }), baseUrl: h('input', { type: 'text', value: c.baseUrl, placeholder: `http://${location.host}` }),
     cert: h('input', { type: 'checkbox', checked: c.rejectUnauthorized === false }),
-    disk: h('input', { type: 'checkbox', checked: n.disk !== false }), pool: h('input', { type: 'checkbox', checked: n.pool !== false }), test: h('input', { type: 'checkbox', checked: n.test !== false }), recovery: h('input', { type: 'checkbox', checked: n.recovery !== false }), link: h('input', { type: 'checkbox', checked: n.link !== false }),
+    disk: h('input', { type: 'checkbox', checked: n.disk !== false }), pool: h('input', { type: 'checkbox', checked: n.pool !== false }), test: h('input', { type: 'checkbox', checked: n.test !== false }), recovery: h('input', { type: 'checkbox', checked: n.recovery !== false }), link: h('input', { type: 'checkbox', checked: n.link !== false }), backup: h('input', { type: 'checkbox', checked: n.backup !== false }),
   };
   const msg = h('p', { role: 'status' });
   const say = (ok, t) => { msg.className = ok ? 'okmsg' : 'error'; msg.textContent = t; };
   const body = () => ({ enabled: f.enabled.checked, host: f.host.value.trim(), port: Number(f.port.value), security: f.security.value, user: f.user.value.trim(), password: f.pw.value || undefined, from: f.from.value.trim(), to: f.to.value.trim(), baseUrl: f.baseUrl.value.trim(),
-    rejectUnauthorized: !f.cert.checked, notify: { disk: f.disk.checked, pool: f.pool.checked, test: f.test.checked, recovery: f.recovery.checked, link: f.link.checked } });
+    rejectUnauthorized: !f.cert.checked, notify: { disk: f.disk.checked, pool: f.pool.checked, test: f.test.checked, recovery: f.recovery.checked, link: f.link.checked, backup: f.backup.checked } });
   const save = async () => { await api('PUT', '/api/mail', body()); f.pw.value = ''; await load(false); };
   const run = (fn, okText) => async () => { try { await save(); await fn(); say(true, okText); } catch (e) { say(false, e.message); } };
   return h('section', { class: 'panel' }, h('h2', {}, 'E-Mail-Benachrichtigung'),
@@ -197,7 +197,7 @@ function mailPanel() {
       h('label', { class: 'f' }, 'Empfänger (mehrere mit Komma, höchstens 5)', f.to), h('label', { class: 'f' }, 'Adresse dieser Oberfläche (für den Link in der Mail, optional)', f.baseUrl)),
     h('label', {}, f.cert, ' Zertifikat des Mailservers nicht prüfen (nur bei selbstsigniertem Zertifikat im eigenen Netz)'),
     h('div', { class: 'f' }, h('span', {}, 'Wann soll eine Mail kommen?'), h('div', { class: 'checks' },
-      h('label', {}, f.disk, ' Platte wird „Bald tauschen“ oder „Kritisch“'), h('label', {}, f.pool, ' ZFS-Pool-Fehler'), h('label', {}, f.test, ' Selbsttest fehlgeschlagen'), h('label', {}, f.link, ' Verbindungsfehler (Kabel, Port): CRC-Zähler steigt oder Kernel meldet SATA-Fehler'), h('label', {}, f.recovery, ' Entwarnung, wenn wieder alles in Ordnung ist'))),
+      h('label', {}, f.disk, ' Platte wird „Bald tauschen“ oder „Kritisch“'), h('label', {}, f.pool, ' ZFS-Pool-Fehler'), h('label', {}, f.test, ' Selbsttest fehlgeschlagen'), h('label', {}, f.link, ' Verbindungsfehler (Kabel, Port): CRC-Zähler steigt oder Kernel meldet SATA-Fehler'), h('label', {}, f.backup, ' Ergebnis des Backup-Laufs (Erfolg kurz, Fehler mit Ursache)'), h('label', {}, f.recovery, ' Entwarnung, wenn wieder alles in Ordnung ist'))),
     msg,
     h('div', { class: 'row' }, h('button', { class: 'primary', onclick: run(async () => {}, 'Gespeichert.') }, 'Speichern'),
       h('button', { onclick: run(() => api('POST', '/api/mail/test', {}), 'Testmail wurde gesendet. Bitte Posteingang prüfen.') }, 'Speichern und Testmail senden'),
@@ -227,15 +227,26 @@ function hostsTable() {
 }
 
 
+const RIGHT_DEFS = [
+  ['snapshots', 'Snapshots auslösen erlauben', 'nur Proxmox-Hosts wie router und pve: das Tool darf das autosnap-Skript starten, den Snapshot-Schalter setzen, den Cron von proxmox-autosnap aus- und einschalten und installiert den verwalteten Wrapper autosnap-run.'],
+  ['backup-starten', 'Backups starten erlauben', 'nur Proxmox-Hosts (router, pve): das Tool darf vzdump mit festen Parametern als eigenen Dienst starten.'],
+  ['herunterfahren', 'Herunterfahren erlauben', 'nur der PBS: das Tool darf den Host nach einem erfolgreichen Backup-Lauf herunterfahren.'],
+];
+/** Haken für die Rechtegruppen. @returns {{nodes:Node[], get:()=>string[]}} */
+function rightsPicker(current = []) {
+  const boxes = RIGHT_DEFS.map(([id, title, hint]) => [id, h('input', { type: 'checkbox', checked: current.includes(id) }), title, hint]);
+  return { nodes: boxes.map(([, box, title, hint]) => h('div', {}, h('label', {}, box, ' ', title, ' '), h('span', { class: 'sub' }, `(${hint})`))), get: () => boxes.filter(([, box]) => box.checked).map(([id]) => id) };
+}
+
 function updatePanel(w) {
   const pw = h('input', { type: 'password', autocomplete: 'off' }); const msg = h('p', { class: 'error', role: 'alert' });
   const g = w.host.gate ?? {};
-  const snapRight = h('input', { type: 'checkbox', checked: (w.host.rights ?? []).includes('snapshots') });
+  const rp = rightsPicker(w.host.rights ?? []);
   const btn = h('button', { class: 'primary', onclick: async () => {
     msg.textContent = '';
     if (!pw.value) { msg.textContent = 'Bitte das root-Passwort des Hosts eingeben.'; return; }
     btn.disabled = true; btn.textContent = 'Läuft …';
-    const body = { action: 'update', hostId: w.host.id, password: pw.value, rights: snapRight.checked ? ['snapshots'] : [] }; pw.value = '';
+    const body = { action: 'update', hostId: w.host.id, password: pw.value, rights: rp.get() }; pw.value = '';
     try { w.result = await api('POST', '/api/setup/run', body); } catch (e) { w.result = { ok: false, error: e.message, log: '' }; }
     w.step = 3; await load(false); render();
   } }, 'Jetzt aktualisieren');
@@ -244,7 +255,7 @@ function updatePanel(w) {
     h('p', {}, g.version != null ? `Auf dem Host läuft Version ${g.version}, aktuell ist Version ${g.expected}.` : 'Die Version auf dem Host ist unbekannt.'),
     h('p', { class: 'sub' }, 'Es wird dasselbe Prüfskript wie bei der Einrichtung neu aufgespielt. Der Fingerabdruck des Hosts wurde damals bestätigt und wird wieder verwendet. Das root-Passwort wird nur für diesen Vorgang benutzt und nicht gespeichert. Auf dem Host werden nur das Prüfskript unter /etc/diskmon, die zugehörige sudo-Regel und der Schlüsseleintrag des Benutzers diskmon erneuert, am Proxmox selbst ändert sich nichts.'),
     h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'root-Passwort des Hosts', pw)),
-    h('label', {}, snapRight, ' Snapshots auslösen erlauben (nur Proxmox-Hosts wie router und pve, nicht der PBS): das Tool darf dann das vorhandene autosnap-Skript starten, den Snapshot-Schalter setzen und den Cron von proxmox-autosnap aus- und einschalten. Sonst nichts.'),
+    h('div', { class: 'f' }, h('span', {}, 'Rechte für das Tool auf diesem Host (nur, was du ankreuzt, wird erlaubt)'), rp.nodes),
     msg, h('div', { class: 'row' }, btn));
   return box;
 }
@@ -290,13 +301,13 @@ function wizardPanel() {
     const bind = h('input', { type: 'checkbox', checked: true });
     const pkgs = h('input', { type: 'checkbox' });
     const rem = h('input', { type: 'checkbox' });
-    const snapRight = h('input', { type: 'checkbox', checked: (w.host?.rights ?? []).includes('snapshots') });
+    const rp = rightsPicker(w.host?.rights ?? []);
     const btn = h('button', { class: 'primary', onclick: async () => {
       msg.textContent = '';
       if (!ok.checked) { msg.textContent = 'Bitte bestätige zuerst den Fingerabdruck.'; return; }
       if (!pw.value) { msg.textContent = 'Bitte das root-Passwort des Hosts eingeben.'; return; }
       btn.disabled = true; btn.textContent = 'Läuft …';
-      const body = { action: w.mode === 'remove' ? 'remove' : 'install', fingerprint: chosen, password: pw.value, bindIp: bind.checked, installPackages: pkgs.checked, removeFromList: rem.checked, rights: w.mode === 'remove' ? undefined : (snapRight.checked ? ['snapshots'] : []) };
+      const body = { action: w.mode === 'remove' ? 'remove' : 'install', fingerprint: chosen, password: pw.value, bindIp: bind.checked, installPackages: pkgs.checked, removeFromList: rem.checked, rights: w.mode === 'remove' ? undefined : rp.get() };
       if (w.mode === 'new') Object.assign(body, w.form, { address: w.fp.address, port: w.fp.port }); else body.hostId = w.host.id;
       pw.value = '';
       try { w.result = await api('POST', '/api/setup/run', body); } catch (e) { w.result = { ok: false, error: e.message, log: '' }; }
@@ -311,7 +322,7 @@ function wizardPanel() {
       w.mode === 'remove' ? h('label', {}, rem, ' Den Host danach auch aus dieser Liste löschen') : [
         h('label', {}, bind, ' Schlüssel an die IP dieses Tools binden (empfohlen: der Zugang gilt dann nur von hier)'),
         h('br'), h('label', {}, pkgs, ' Fehlende Pakete (sudo, smartmontools) auf dem Host installieren'),
-        h('br'), h('label', {}, snapRight, ' Snapshots auslösen erlauben (nur Proxmox-Hosts): das Tool darf dann das vorhandene autosnap-Skript starten, den Snapshot-Schalter setzen und den Cron von proxmox-autosnap aus- und einschalten. Sonst nichts.')],
+        h('br'), h('div', { class: 'f' }, h('span', {}, 'Rechte für das Tool auf diesem Host (nur, was du ankreuzt, wird erlaubt)'), rp.nodes)],
       h('p', { class: 'sub' }, w.mode === 'remove' ? 'Entfernt den Benutzer diskmon, das Prüfskript und die sudo-Regel vom Host.' : 'Legt auf dem Host den Benutzer „diskmon“, das Prüfskript unter /etc/diskmon und eine sudo-Regel nur für dieses Skript an. Am Proxmox-Kern ändert sich nichts.'),
       msg, h('div', { class: 'row' }, btn, h('button', { onclick: () => { w.step = 1; render(); } }, 'Zurück')));
   } else {

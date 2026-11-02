@@ -108,6 +108,17 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       return send(res, 200, engine.pollingSettings());
     }
     if (route === 'GET /api/backups') return send(res, 200, backupOverview(engine));
+    if (route === 'POST /api/backups/control') {
+      const b = await readBody(req);
+      try {
+        if (b.action === 'settings') engine.orch.save(b.settings ?? {});
+        else if (b.action === 'dryrun') return send(res, 200, { ok: true, plan: await engine.orch.dryRun() });
+        else if (b.action === 'start') await engine.orch.startNow();
+        else if (b.action === 'abort') engine.orch.abort();
+        else throw new Error('Unbekannte Aktion');
+      } catch (e) { return send(res, 400, { error: e.message }); }
+      return send(res, 200, { ok: true });
+    }
     if (route === 'GET /api/stats') return send(res, 200, statsOverview(engine));
     if (route === 'GET /api/tests') {
       const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit')) || 300));

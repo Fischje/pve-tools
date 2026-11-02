@@ -122,6 +122,74 @@ function hostPanel(b, host, data) {
     h('h3', {}, 'Backup-Läufe'), runs);
 }
 
+const JOB_STATE = { wartet: ['unknown', 'wartet'], läuft: ['watch', 'läuft'], ok: ['ok', 'in Ordnung'], fehler: ['critical', 'nicht erfolgreich'], fehlt: ['critical', 'nicht erreicht'], übersprungen: ['unknown', 'übersprungen'] };
+const SHUTDOWN = { angefordert: 'Der PBS wurde heruntergefahren.', aus: 'Der PBS bleibt an (Herunterfahren ist ausgeschaltet).', 'fehlt-recht': 'Der PBS bleibt an: das Recht „Herunterfahren“ fehlt.', fehler: 'Der PBS konnte nicht heruntergefahren werden.', nein: 'Der PBS bleibt an, damit nichts verloren geht.' };
+
+function jobBox(job, title, now) {
+  if (!job) return null;
+  const cls = job.phase === 'läuft' ? 'ok' : job.phase === 'fertig' ? 'ok' : 'critical';
+  return h('div', { class: `finding ${cls}` },
+    h('b', {}, `${title}: ${fmtDT(job.startedAt)}${job.manual ? ' (von Hand)' : ''}${job.phase === 'läuft' ? ` – läuft seit ${ago(job.startedAt, now)}` : job.phase === 'abgebrochen' ? ' – im Tool abgebrochen' : job.phase === 'fertig' ? ' – alles gesichert' : ' – nicht vollständig erfolgreich'}`),
+    h('ul', { class: 'plain' }, job.hosts.map((x) => h('li', {}, h('b', {}, x.id), ' ', pill(JOB_STATE[x.state]?.[0] ?? 'unknown', JOB_STATE[x.state]?.[1] ?? x.state),
+      x.total != null ? ` ${x.total - (x.failed ?? 0)} von ${x.total} Gästen, ${x.minutes ?? '?'} min` : '', x.note ? h('div', { class: 'sub' }, x.note) : null,
+      x.failedGuests?.length ? h('div', { class: 'sub bad' }, `Fehlgeschlagen: ${x.failedGuests.map((g) => g.vmid).join(', ')}`) : null))),
+    job.phase !== 'läuft' && job.shutdown ? h('div', { class: 'sub' }, SHUTDOWN[job.shutdown] ?? '') : null);
+}
+
+function controlPanel(b, data) {
+  const c = b.control; if (!c) return null;
+  const s = c.settings, act = (body, okText) => ctx.act(() => ctx.api('POST', '/api/backups/control', body), okText);
+  const field = (type, v, extra = {}) => h('input', { type, value: v, ...extra });
+  const f = { pbs: h('select', {}, c.hostChoices.map((x) => h('option', { value: x.id, selected: x.id === s.pbsHostId }, x.label))), storage: field('text', s.storage, { size: 10 }),
+    wait: field('number', s.waitAfterBootMin, { min: 0, max: 240, style: 'width:5em' }), hostWait: field('number', s.hostWaitMin, { min: 1, max: 240, style: 'width:5em' }),
+    shutdown: h('input', { type: 'checkbox', checked: s.shutdown }) };
+  // Gäste je Host: Haken = wird gesichert. Gespeichert wird die Ausschlussliste, damit neue Gäste automatisch mitgesichert werden (wie --all).
+  const picks = new Map(c.hosts.map((x) => [x.id, {
+    enabled: h('input', { type: 'checkbox', checked: x.enabled }),
+    boxes: x.guests.sort((p, q) => p.vmid - q.vmid).map((g) => ({ g, box: h('input', { type: 'checkbox', checked: x.select === 'all' ? true : x.select === 'exclude' ? !x.ids.includes(g.vmid) : x.ids.includes(g.vmid) }) })),
+    unknown: x.select === 'exclude' ? x.ids.filter((id) => !x.guests.some((g) => g.vmid === id)) : [],
+  }]));
+  const collect = () => ({
+    storage: f.storage.value.trim(), pbsHostId: f.pbs.value, waitAfterBootMin: Number(f.wait.value), hostWaitMin: Number(f.hostWait.value), shutdown: f.shutdown.checked,
+    hosts: Object.fromEntries(c.hosts.map((x) => { const p = picks.get(x.id); const off = [...p.boxes.filter((y) => !y.box.checked).map((y) => y.g.vmid), ...p.unknown]; return [x.id, { enabled: p.enabled.checked, select: 'exclude', ids: off }]; })),
+  });
+  const out = h('div', { hidden: true });
+  const dry = async () => {
+    out.hidden = false; out.replaceChildren(h('p', { class: 'sub' }, 'Prüfe …'));
+    try {
+      await ctx.api('POST', '/api/backups/control', { action: 'settings', settings: collect() });
+      const { plan } = await ctx.api('POST', '/api/backups/control', { action: 'dryrun' });
+      out.replaceChildren(h('div', { class: 'finding info' }, h('b', {}, `Trockenlauf: so würde gesichert (Speicher „${plan.storage}“)`),
+        plan.problems.length ? h('ul', { class: 'plain bad' }, plan.problems.map((p) => h('li', {}, `✖ ${p}`))) : h('div', { class: 'sub' }, '✔ Keine Probleme gefunden.'),
+        plan.hosts.map((x) => h('details', {}, h('summary', {}, `${x.label}: ${x.enabled ? `${x.guests.length} Gäste${x.excluded ? `, ${x.excluded} ausgenommen` : ''}` : 'ausgeschaltet'}${x.reachable ? '' : ' (nicht erreichbar)'}`),
+          h('div', { class: 'sub' }, h('code', {}, x.command)), h('div', {}, x.guests.map((g) => `${g.vmid} ${g.name}`).join(', ') || '–'))),
+        h('div', { class: 'sub' }, plan.shutdown ? 'Nach vollständigem Erfolg wird der PBS heruntergefahren.' : 'Der PBS bleibt nach dem Lauf an.')));
+    } catch (e) { out.replaceChildren(h('p', { class: 'error' }, e.message)); }
+  };
+  const save = () => act({ action: 'settings', settings: collect() }, 'Einstellungen gespeichert.');
+  const steuern = s.mode === 'steuern';
+  const hostBlocks = c.hosts.map((x) => { const p = picks.get(x.id); return h('details', {}, h('summary', {}, h('label', {}, p.enabled, ` ${x.label}`), h('span', { class: 'sub' }, ` – ${p.boxes.filter((y) => y.box.checked).length} von ${p.boxes.length} Gästen werden gesichert${x.right ? '' : ' · Recht „Backups starten“ fehlt'}`)),
+    h('div', { class: 'checks' }, p.boxes.map(({ g, box }) => h('label', { class: g.status === 'running' ? '' : 'sub' }, box, ` ${g.vmid} ${g.name}${g.status === 'running' ? '' : ' (aus)'}`)))); });
+  return h('section', { class: 'panel' }, h('h2', {}, 'Backup-Lauf'),
+    h('div', { class: `finding ${steuern ? 'ok' : 'info'}` },
+      h('b', {}, steuern ? 'Das Tool steuert die Backup-Läufe' : 'Das Tool beobachtet nur (der bisherige Orchestrator auf dem PBS läuft)'),
+      h('div', { class: 'sub' }, steuern ? `Nach dem Hochfahren des PBS (${c.pbs.label}) wartet das Tool ${s.waitAfterBootMin} min und sichert dann host für host. Der PBS wird nur nach vollständigem Erfolg heruntergefahren${s.shutdown ? '' : ' (ausgeschaltet: er bleibt immer an)'}. Den alten Orchestrator bitte auf dem PBS abschalten (Cron @reboot), sonst laufen zwei Steuerungen.` : 'Zuerst Einstellungen und Trockenlauf prüfen. Dann die Betriebsart auf „Das Tool steuert“ stellen und auf dem PBS den alten Orchestrator abschalten (Cron @reboot auskommentieren).'),
+      h('div', { class: 'actions' },
+        steuern ? h('button', { onclick: () => act({ action: 'settings', settings: { mode: 'beobachten' } }, 'Das Tool beobachtet nur.') }, 'Zurück auf „nur beobachten“')
+          : h('button', { class: 'primary', onclick: () => { if (confirm('Das Tool steuert ab jetzt die Backups. Hast du den alten Orchestrator auf dem PBS abgeschaltet?')) act({ action: 'settings', settings: { mode: 'steuern' } }, 'Das Tool steuert die Backups.'); } }, 'Das Tool steuert'),
+        h('button', { onclick: () => { if (confirm('Jetzt einen Backup-Lauf starten? Der PBS muss laufen.')) act({ action: 'start' }, 'Backup-Lauf gestartet.'); } }, 'Jetzt Backup starten'),
+        b.control.job?.phase === 'läuft' ? h('button', { onclick: () => act({ action: 'abort' }, 'Im Tool abgebrochen.') }, 'Im Tool abbrechen') : null)),
+    jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', b.now), jobBox(c.job?.phase === 'läuft' ? c.last : (c.job ?? c.last), 'Letzter Lauf des Tools', b.now),
+    h('details', {}, h('summary', {}, 'Einstellungen und Auswahl der Gäste'),
+      h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'PBS-Host (wird heruntergefahren)', f.pbs), h('label', { class: 'f' }, 'Speicher auf den Hosts', f.storage),
+        h('label', { class: 'f' }, 'Wartezeit nach dem Hochfahren (Minuten)', f.wait), h('label', { class: 'f' }, 'Höchstens so lange auf einen Host/Speicher warten (Minuten)', f.hostWait)),
+      h('label', {}, f.shutdown, ' PBS nach vollständigem Erfolg herunterfahren'),
+      !c.pbs.rightShutdown ? h('p', { class: 'sub bad' }, `Auf ${c.pbs.label} ist das Recht „Herunterfahren“ nicht freigegeben (Reiter Hosts einrichten).`) : null,
+      h('h3', {}, 'Was wird gesichert? (Reihenfolge von oben nach unten)'),
+      h('p', { class: 'sub' }, 'Haken = wird gesichert. Neue Gäste werden automatisch mitgesichert, es sei denn, du nimmst den Haken heraus.'), hostBlocks,
+      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: save }, 'Speichern'), h('button', { onclick: dry }, 'Speichern und Trockenlauf'))), out);
+}
+
 export function backupsView(b, data) {
   if (!b) return h('p', { class: 'empty' }, 'Keine Daten. Bitte neu laden.');
   const k = b.kpi, last = b.lastRun;
@@ -132,9 +200,9 @@ export function backupsView(b, data) {
     kpi('Snapshots', k.snapshotsOff ? `${k.snapshotsOn} an, ${k.snapshotsOff} aus` : `${k.snapshotsOn} Hosts an`, 'Schalter von proxmox-autosnap', k.snapshotsOff ? 'watch' : 'ok'),
     kpi('Gäste mit Hinweis', k.problems, `von ${k.guests} Gästen`, k.problems ? 'watch' : 'ok'));
   return [
-    h('section', { class: 'panel' }, h('h2', {}, 'Backups und Snapshots'), h('p', { class: 'sub' }, 'Diese Ansicht beobachtet nur. Gesichert und gesnapshottet wird weiterhin von deinen Skripten (Orchestrator auf dem PBS, proxmox-autosnap auf den Hosts). Die Steuerung kommt in späteren Stufen.')),
+    h('section', { class: 'panel' }, h('h2', {}, 'Backups und Snapshots'), h('p', { class: 'sub' }, 'Gäste, Snapshot-Stand und Backup-Läufe der Hosts. Snapshots und Backup-Läufe kann das Tool auch selbst steuern (siehe unten und „Planung ändern“ je Host).')),
     outdated.map((x) => h('div', { class: 'banner warn' }, h('div', {}, h('b', {}, `Das Prüfskript auf ${x.label} ist veraltet (Version ${x.gate.version}).`), h('div', { class: 'sub' }, `Für die Anzeige von Backups und Snapshots wird Version ${x.gate.expected} gebraucht.`)),
       h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => ctx.openUpdate(data.hosts.find((y) => y.id === x.id)) }, 'Jetzt aktualisieren')))),
-    kpis, b.hosts.map((x) => hostPanel(b, x, data)),
+    kpis, controlPanel(b, data), b.hosts.map((x) => hostPanel(b, x, data)),
   ];
 }

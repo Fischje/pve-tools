@@ -6,7 +6,7 @@ import { sendMail, validAddress } from './smtp.js';
 
 export const MAIL_DEFAULTS = {
   enabled: false, host: '', port: 587, security: 'starttls', user: '', from: '', to: '', baseUrl: '', rejectUnauthorized: true,
-  notify: { disk: true, pool: true, test: true, recovery: true, link: true }, baselineAt: null,
+  notify: { disk: true, pool: true, test: true, recovery: true, link: true, backup: true }, baselineAt: null,
 };
 const rank = (l) => LEVEL_ORDER.indexOf(l);
 const ICON = { critical: '✖', replace: '▲', watch: '!', ok: '✔', info: 'i' };
@@ -29,7 +29,7 @@ export function cleanMail(input) {
   }
   if ('baseUrl' in input) { out.baseUrl = str(input.baseUrl, 200, 'Adresse der Oberfläche'); if (out.baseUrl && !/^https?:\/\/[^\s]+$/.test(out.baseUrl)) throw new Error('Adresse der Oberfläche: muss mit http:// oder https:// beginnen'); }
   if ('rejectUnauthorized' in input) out.rejectUnauthorized = !!input.rejectUnauthorized;
-  if ('notify' in input) out.notify = { disk: !!input.notify?.disk, pool: !!input.notify?.pool, test: !!input.notify?.test, recovery: !!input.notify?.recovery, link: input.notify?.link !== false };
+  if ('notify' in input) out.notify = { disk: !!input.notify?.disk, pool: !!input.notify?.pool, test: !!input.notify?.test, recovery: !!input.notify?.recovery, link: input.notify?.link !== false, backup: input.notify?.backup !== false };
   return out;
 }
 
@@ -166,6 +166,20 @@ export class Notifier {
         `Host: ${hl}\n\nDer Kernel meldet Verbindungsfehler zu Platten (letzte 48 Stunden):\n${this.findingLines(lf)}\n${link}${this.foot()}`);
       if (ok) this.db.setAlert(key, 'sent', `${sig}|${now.getTime()}`, now);
     }
+  }
+
+  /** Ergebnis eines vom Tool gesteuerten Backup-Laufs: bei Fehlern immer eine Mail (PBS bleibt an), bei Erfolg eine kurze Meldung. */
+  async backupJob(job) {
+    if (!this.ready() || !this.config().notify.backup) return;
+    const key = `bkjob:${job.id}`;
+    if (this.db.getAlert(key)) return;
+    const c = this.config(), ok = job.phase === 'fertig';
+    const label = (id) => this.engine.hosts.find((h) => h.id === id)?.label ?? id;
+    const lines = job.hosts.map((h) => ` ${h.state === 'ok' ? '✔' : '✖'} ${label(h.id)}: ${{ ok: 'in Ordnung', fehler: 'nicht erfolgreich', fehlt: 'nicht erreicht', übersprungen: 'übersprungen', wartet: 'nicht gestartet', läuft: 'läuft noch' }[h.state] ?? h.state}${h.total != null ? ` (${h.total - (h.failed ?? 0)} von ${h.total} Gästen, ${h.minutes ?? '?'} min)` : ''}${h.note ? ` – ${h.note}` : ''}${h.failedGuests?.length ? `\n     Fehlgeschlagen: ${h.failedGuests.map((g) => g.vmid).join(', ')}` : ''}`).join('\n');
+    const pbs = { angefordert: 'Der PBS wird heruntergefahren.', aus: 'Der PBS bleibt an (Herunterfahren ist ausgeschaltet).', 'fehlt-recht': 'Der PBS bleibt an: das Recht „Herunterfahren“ fehlt.', fehler: `Der PBS konnte nicht heruntergefahren werden: ${job.shutdownNote ?? ''}`, nein: 'Der PBS bleibt an, damit nichts verloren geht. Bitte die Ursache prüfen.' }[job.shutdown] ?? '';
+    const sent = await this.safeDeliver(ok ? '[Backup] Lauf abgeschlossen: alles gesichert' : '[Backup] Lauf NICHT vollständig erfolgreich',
+      `Backup-Lauf vom ${new Date(job.startedAt).toLocaleString('de-DE')}${job.manual ? ' (von Hand gestartet)' : ''}\n\n${lines}\n\n${pbs}\n${this.link(c)}${this.foot()}`);
+    if (sent) this.db.setAlert(key, 'sent', 'sent', this.engine.now());
   }
 
   /** Aufgerufen, wenn ein Selbsttest mit Fehler endet (nicht bei „unterbrochen“). */
