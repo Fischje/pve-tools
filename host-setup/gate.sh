@@ -21,11 +21,16 @@
 #   tasks                        letzte vzdump-Aufgaben dieses Knotens (JSON)
 #   tasklog <UPID>               Protokoll einer vzdump-Aufgabe (JSON)
 #   autosnap                     Zustand der Snapshot-Skripte (Schalter, Aufbewahrung, Cron, letzte Meldungen)
+#   rechte                       Welche Rechtegruppen für dieses Skript freigegeben sind (Datei /etc/diskmon/rechte)
 #   kernel                       Kernel-Meldungen der letzten 48 h zu SATA/NVMe-Verbindungsfehlern (nur ausgewählte Zeilen)
+# Schreibende Befehle, nur wenn die Rechtegruppe "snapshots" bei der Einrichtung freigegeben wurde (mit dem root-Passwort):
+#   snap-run hourly|weekly|monthly [force]   startet den vorhandenen /usr/local/sbin/autosnap-run mit dieser Bezeichnung
+#   snap-switch on|off                       setzt/löscht /etc/autosnap.disabled (Snapshots aus/an)
+#   snap-cron on|off|status                  benennt /etc/cron.d/proxmox-autosnap um (aus) bzw. zurück (an), damit nie zwei Auslöser laufen
 set -euo pipefail
 
 # Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
-GATE_VERSION=5
+GATE_VERSION=6
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
@@ -42,6 +47,10 @@ dev_ok() {
   lsblk -dn -o NAME,TYPE | awk -v n="$name" '$1==n && $2=="disk" {found=1} END {exit !found}' || fail "keine Platte: $d"
 }
 num_ok() { [[ "$1" =~ ^[0-9]{1,13}$ ]] || fail "keine Zahl: $1"; }
+
+RECHTE=/etc/diskmon/rechte
+recht() { [[ -r "$RECHTE" ]] && grep -qx "$1" "$RECHTE"; }
+need() { recht "$1" || fail "Recht '$1' ist für diesen Host nicht freigegeben (Reiter Hosts einrichten, Skript aktualisieren)"; }
 
 case "${a[0]}" in
   version)
@@ -108,6 +117,32 @@ case "${a[0]}" in
     echo "== wrapper"; cat /usr/local/sbin/autosnap-run 2>/dev/null || true
     echo "== cron"; cat /etc/cron.d/proxmox-autosnap 2>/dev/null || true
     echo "== log"; journalctl -t autosnap -n 40 --no-pager -o short-iso 2>/dev/null || true ;;
+  rechte)
+    [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
+    cat "$RECHTE" 2>/dev/null || true ;;
+  snap-run)
+    need snapshots
+    [[ ${#a[@]} -ge 2 && ${#a[@]} -le 3 ]] || fail "Argumente: snap-run hourly|weekly|monthly [force]"
+    [[ "${a[1]}" =~ ^(hourly|weekly|monthly)$ ]] || fail "unbekannte Bezeichnung"
+    [[ -z "${a[2]:-}" || "${a[2]}" == "force" ]] || fail "unbekannte Option"
+    [[ -x /usr/local/sbin/autosnap-run ]] || fail "autosnap-run fehlt"
+    [[ "${a[2]:-}" == "force" ]] && export FORCE=1
+    exec flock -n /run/diskmon-snap.lock /usr/local/sbin/autosnap-run "${a[1]}" ;;
+  snap-switch)
+    need snapshots
+    [[ ${#a[@]} -eq 2 && "${a[1]}" =~ ^(on|off)$ ]] || fail "Argumente: snap-switch on|off"
+    if [[ "${a[1]}" == "off" ]]; then touch /etc/autosnap.disabled; else rm -f /etc/autosnap.disabled; fi
+    echo "schalter: $([[ -e /etc/autosnap.disabled ]] && echo aus || echo an)" ;;
+  snap-cron)
+    need snapshots
+    [[ ${#a[@]} -eq 2 && "${a[1]}" =~ ^(on|off|status)$ ]] || fail "Argumente: snap-cron on|off|status"
+    # Dateien mit Punkt im Namen ignoriert cron: so ist "aus" reversibel, ohne etwas zu löschen.
+    c=/etc/cron.d/proxmox-autosnap; d=/etc/cron.d/proxmox-autosnap.tool-aus
+    case "${a[1]}" in
+      off) [[ -e "$c" ]] && mv "$c" "$d" ;;
+      on)  [[ -e "$d" ]] && mv "$d" "$c" ;;
+    esac
+    echo "cron: $([[ -e "$c" ]] && echo an || { [[ -e "$d" ]] && echo vom-tool-aus || echo fehlt; })" ;;
   kernel)
     [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
     # Nur Zeilen zu ATA-Bus-/Link-Fehlern und NVMe-Resets, höchstens 300. Kein Zugriff auf andere Logs.

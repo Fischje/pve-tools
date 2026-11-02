@@ -76,3 +76,22 @@ test('kernel: nur Zeilen zu Verbindungsfehlern, keine Argumente', () => {
   assert.doesNotMatch(k.out, /eth0/);
   assert.equal(run('kernel 5').code, 64);
 });
+
+test('schreibende Snapshot-Befehle: ohne freigegebenes Recht abgelehnt, Argumente streng geprüft', () => {
+  // Auf dem Testrechner gibt es /etc/diskmon/rechte nicht: alles muss mit "nicht freigegeben" scheitern.
+  for (const c of ['snap-run hourly', 'snap-run monthly force', 'snap-switch off', 'snap-cron off', 'snap-cron status']) {
+    const r = run(c);
+    assert.equal(r.code, 64, c);
+    assert.match(r.err, /nicht freigegeben/, c);
+  }
+  // Selbst mit Recht dürfen nur feste Werte durch: hier prüfen wir, dass unerlaubte Zeichen schon vorher abgewiesen werden.
+  for (const c of ['snap-run hourly; id', 'snap-run $(id)', 'snap-run hourly force extra', 'snap-run daily', 'snap-switch', 'snap-cron remove']) {
+    assert.equal(run(c).code, 64, c);
+  }
+});
+
+test('rechte: leer, wenn nichts freigegeben ist', () => {
+  assert.equal(run('rechte').code, 0);
+  assert.equal(run('rechte').out, '');
+  assert.equal(run('rechte x').code, 64);
+});

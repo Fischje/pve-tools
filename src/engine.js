@@ -2,6 +2,7 @@
 import { rateKernel } from './kernel.js';
 import { DEFAULT_SETTINGS, decide, canStartManual, advanceProgress, dayKey } from './schedule.js';
 import { rate } from './rating.js';
+import { dueSnapshots, SNAP_DEFAULTS, LABEL_DE } from './snapshots.js';
 import { ratePool } from './zfs.js';
 
 const MIN = 60000;
@@ -81,6 +82,9 @@ export class Engine {
       } catch (e) { this.event(hostId, null, `${dev.device}: ${e.message}`); }
     }
     this.db.setHostState(hostId, { lastPoll: now, reachable: true, uptimeSec: uptime, uptimeAt: now, pools, error: null, gateVersion });
+    if ((gateVersion ?? 1) >= 6) {
+      try { this.db.setSetting(`rights:${hostId}`, JSON.stringify(await client.rights())); } catch (e) { this.log(`[${hostId}] Rechte: ${e.message}`); }
+    }
     if ((gateVersion ?? 1) >= 5) {
       try { this.db.setSetting(`kernel:${hostId}`, JSON.stringify(await client.kernelLog())); } catch (e) { this.log(`[${hostId}] Kernel-Meldungen: ${e.message}`); }
     }
@@ -195,7 +199,50 @@ export class Engine {
     this.lastDecision.set(hostId, dec);
     if (dec.action === 'start') await this.startNow(hostId, dec.serial, dec.test, 'plan');
     else if (dec.action === 'abort') await this.abortNow(hostId, dec.serial, dec.reason);
+    await this.tickSnapshots(hostId);
   }
+
+  // ---- Snapshots, die das Tool auslöst (statt Cron auf dem Host) ----
+  hostRights(hostId) { try { return JSON.parse(this.db.getSetting(`rights:${hostId}`) ?? '[]'); } catch { return []; } }
+  snapCtl(hostId) { try { return { ...SNAP_DEFAULTS, ...JSON.parse(this.db.getSetting(`snapctl:${hostId}`) ?? '{}') }; } catch { return { ...SNAP_DEFAULTS }; } }
+  snapLast(hostId) { try { return JSON.parse(this.db.getSetting(`snaplast:${hostId}`) ?? '{}'); } catch { return {}; } }
+  snapGuard(hostId) { if (!this.hostRights(hostId).includes('snapshots')) throw new Error('Für diesen Host ist das Recht „Snapshots auslösen“ nicht freigegeben. Im Reiter „Hosts einrichten“ bei „Skript aktualisieren“ freigeben.'); }
+
+  /** Läuft im Minutentakt: fällige Snapshot-Läufe auslösen, wenn das Tool für diesen Host zuständig ist. */
+  async tickSnapshots(hostId) {
+    if (this.snapCtl(hostId).mode !== 'tool' || !this.hostRights(hostId).includes('snapshots')) return;
+    const hs = this.db.getHostState(hostId);
+    if (!hs?.reachable) return;
+    const as = this.db.getAutosnap(hostId);
+    const now = this.now();
+    const uptimeSec = hs.uptimeSec != null && hs.uptimeAt ? hs.uptimeSec + (now - hs.uptimeAt) / 1000 : null;
+    const due = dueSnapshots(now, { pauseDay: as?.pauseDay ?? null, enabled: !as || !as.known || as.enabled, uptimeSec, last: this.snapLast(hostId) });
+    for (const { label, force } of due) await this.runSnapshot(hostId, label, { force });
+  }
+
+  /** Einen Snapshot-Lauf ausführen und das Ergebnis merken. */
+  async runSnapshot(hostId, label, { force = false, manual = false } = {}) {
+    this.snapGuard(hostId);
+    const now = this.now();
+    const r = await this.client(hostId).snapRun(label, { force });
+    const last = this.snapLast(hostId);
+    last[label] = { ts: now.getTime(), ok: r.ok, text: r.text.slice(-200) };
+    this.db.setSetting(`snaplast:${hostId}`, JSON.stringify(last));
+    this.event(hostId, null, r.ok ? `Snapshots (${LABEL_DE[label]}) ausgelöst${manual ? ' – von Hand' : ''}` : `Snapshots (${LABEL_DE[label]}) fehlgeschlagen: ${r.text || `Code ${r.code}`}`);
+    return r;
+  }
+
+  /** Das Tool übernimmt die Auslösung: erst Cron auf dem Host aus, dann umschalten. Rückwärts: erst umschalten, dann Cron an. */
+  async setSnapMode(hostId, mode) {
+    if (!['tool', 'cron'].includes(mode)) throw new Error('Ungültiger Modus');
+    this.snapGuard(hostId);
+    const c = this.client(hostId);
+    if (mode === 'tool') { await c.snapCron('off'); this.db.setSetting(`snapctl:${hostId}`, JSON.stringify({ ...this.snapCtl(hostId), mode })); }
+    else { this.db.setSetting(`snapctl:${hostId}`, JSON.stringify({ ...this.snapCtl(hostId), mode })); await c.snapCron('on'); }
+    this.event(hostId, null, mode === 'tool' ? 'Snapshots: das Tool löst jetzt aus, der Cron auf dem Host ist aus' : 'Snapshots: zurück auf Cron auf dem Host');
+    this.pollBackups(hostId, c, this.now(), true).catch(() => {});
+  }
+  async setSnapSwitch(hostId, on) { this.snapGuard(hostId); await this.client(hostId).snapSwitch(on); this.event(hostId, null, `Snapshots ${on ? 'eingeschaltet' : 'ausgeschaltet'}`); this.pollBackups(hostId, this.client(hostId), this.now(), true).catch(() => {}); }
 
   async startNow(hostId, serial, plan, origin) {
     const now = this.now();

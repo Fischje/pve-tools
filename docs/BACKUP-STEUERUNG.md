@@ -1,6 +1,6 @@
 # Backup- und Snapshot-Steuerung
 
-Stand: Stufe 1 (Beobachten) ist umgesetzt, Stufen 2 und 3 sind Plan. Ziel: Das Tool (läuft im LXC auf dem immer eingeschalteten `router`) überwacht Backups und
+Stand: Stufe 1 (Beobachten) und Stufe 2 (Snapshots auslösen) sind umgesetzt, Stufe 3 (Backup-Lauf) ist Plan. Ziel: Das Tool (läuft im LXC auf dem immer eingeschalteten `router`) überwacht Backups und
 Snapshots, die heute Skripte erledigen, und übernimmt später die Steuerung. Parameter lassen sich dann in der Oberfläche ändern.
 
 ## So ist es heute eingerichtet (nach deinen Skripten)
@@ -40,13 +40,28 @@ steht im Orchestrator. Deshalb gibt es nur dann einen Hinweis, wenn ein Gast fr�
 **Was die Ansicht vermutlich zeigen wird:** Die wöchentlichen und monatlichen Snapshots laufen um 00:25 und 00:45. Läuft der `pve` dann nicht, fallen sie aus. Das ist eine
 Vermutung aus den Cron-Zeiten, die Ansicht klärt sie. Fehlt dort der wöchentliche oder monatliche Snapshot, steht ein Hinweis bei dem Gast.
 
-## Stufe 2: Snapshots verwalten (Plan)
+## Stufe 2: Snapshots auslösen durch das Tool (umgesetzt)
 
-Die Snapshots sollen **weiter auf den Hosts per Cron laufen**, damit sie auch dann entstehen, wenn der LXC aus ist. Das Tool verwaltet nur die Einstellungen und überwacht:
-- `autosnap-run` liest `KEEP`, Pausentag und Tag aus einer kleinen Datei `/etc/autosnap.conf` statt aus dem Skript. Das Tool schreibt diese Datei über einen geprüften Befehl
-  (nur Zahlen in festen Grenzen, nur der Tag-Name aus einer Positivliste).
-- Ein/Aus-Schalter in der Oberfläche (setzt oder löscht `/etc/autosnap.disabled`).
-- Trockenlauf-Anzeige: was `autosnap-run` jetzt tun würde.
+Entscheidung: Das Tool löst die Snapshots aus, der Cron auf den Hosts entfällt. `proxmox-autosnap` bleibt die Werkzeugbasis: Das Tool startet nur den vorhandenen
+`autosnap-run` mit der Bezeichnung (`hourly`, `weekly`, `monthly`). Anlegen, Auswahl der Gäste, Aufbewahrung und Löschen alter Snapshots regelt weiter dieses Skript.
+Das Tool bekommt kein Löschrecht.
+
+- **Recht „snapshots“:** Schreibende Befehle brauchen eine eigene Freigabe auf dem Host (Prüfskript Version 6, Datei `/etc/diskmon/rechte`). Sie wird mit dem root-Passwort
+  im Reiter „Hosts einrichten“ erteilt (Haken „Snapshots auslösen erlauben“, auch bei „Skript aktualisieren“). Ohne Freigabe lehnt das Prüfskript sie ab.
+- **Neue Befehle im Prüfskript:** `snap-run hourly|weekly|monthly [force]`, `snap-switch on|off`, `snap-cron on|off|status`, lesend `rechte`. Alle mit festen Werten,
+  ein Sperrmechanismus (`flock`) verhindert zwei Läufe gleichzeitig.
+- **Übernahme:** Button „Das Tool übernimmt“ im Reiter „Backups & Snapshots“. Das Tool benennt zuerst `/etc/cron.d/proxmox-autosnap` in `….tool-aus` um (cron ignoriert
+  Dateien mit Punkt im Namen, nichts wird gelöscht) und stellt dann um. „Zurück zum Cron“ macht es rückgängig, in umgekehrter Reihenfolge.
+- **Zeitplan wie bisher:** stündlich um :05, wöchentlich sonntags 00:25, monatlich am 1. um 00:45 (ist der 1. der Pausentag, am 2.). Pausentag und Schalter liest das Tool
+  aus dem Wrapper. Montags löst es nichts aus.
+- **Nachholen:** Ist der Host zur Zeit eines Wochen- oder Monatslaufs aus (der `pve` nachts), holt das Tool den Lauf nach, sobald der Host läuft (nach 10 Minuten Laufzeit,
+  damit die Container oben sind). Der Monatslauf geht dann mit `force`, sonst blockt das Datumsfenster im Wrapper. Verpasste Stundenläufe werden nicht nachgeholt.
+- **Fehler:** Schlägt ein Lauf fehl, steht der Fehler in der Oberfläche und im Ereignisprotokoll, ein neuer Versuch folgt nach 15 Minuten.
+- **Ein/Aus-Schalter** und **„Jetzt stündlichen Lauf auslösen“** in der Oberfläche.
+- **Zu bedenken:** Fällt der LXC `pve-tools` aus, entstehen keine Snapshots mehr (der Cron lief auf den Hosts selbst). Die vorhandene Prüfung „ausgebliebene Stunden-Snapshots“
+  zeigt das an. Ein Alarm per Mail dafür ist ein nächster Schritt.
+- **Noch offen in dieser Stufe:** Aufbewahrung (`KEEP`) und Pausentag in der Oberfläche ändern. Dafür muss der Wrapper die Werte aus einer Datei lesen statt fest im Skript.
+  Das setzt voraus, die echten Wrapper zu kennen (bitte `cat /usr/local/sbin/autosnap-run` von `router` und `pve` schicken).
 
 ## Stufe 3: Backup-Lauf durch das Tool (Plan)
 

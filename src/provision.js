@@ -38,7 +38,10 @@ async function defaultResolve(address) {
 export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 /** Das Skript, das auf dem Host über `bash -s` läuft. gate.sh und setup-host.sh werden darin als Dateien abgelegt. */
-export function buildRemoteScript({ gate, setup, publicKey, action, bindIp, installPackages }) {
+export const RIGHTS = ['snapshots'];
+/** rights: null = Rechtedatei auf dem Host unverändert lassen, sonst Liste der freizugebenden Gruppen (leer = alle entziehen). */
+export function buildRemoteScript({ gate, setup, publicKey, action, bindIp, installPackages, rights = null }) {
+  if (rights != null && !(Array.isArray(rights) && rights.every((r) => RIGHTS.includes(r)))) throw new Error('Unbekannte Rechtegruppe');
   if (!KEY_RE.test(publicKey)) throw new Error('Ungültiger öffentlicher Schlüssel');
   let d1, d2;
   do { d1 = `DISKTOOL_${randomBytes(8).toString('hex')}_A`; d2 = `DISKTOOL_${randomBytes(8).toString('hex')}_B`; } while (gate.includes(d1) || setup.includes(d2));
@@ -49,7 +52,7 @@ ${bindIp ? 'SRC="${SSH_CONNECTION%% *}"' : ''}
 if [[ -n "$SRC" ]]; then bash "$T/setup-host.sh" ${shq(publicKey)} "$SRC"; else bash "$T/setup-host.sh" ${shq(publicKey)}; fi`;
   return `set -euo pipefail
 export DISKMON_PAKETE_INSTALLIEREN=${installPackages ? 1 : 0}
-T="$(mktemp -d)"
+${rights != null ? `export DISKMON_RECHTE=${shq(rights.join(','))}\n` : ''}T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 cat > "$T/gate.sh" <<'${d1}'
 ${gate}
@@ -159,7 +162,7 @@ export class Provisioner {
     const gate = await readFile(path.join(this.repoDir, 'host-setup', 'gate.sh'), 'utf8');
     const setup = await readFile(path.join(this.repoDir, 'host-setup', 'setup-host.sh'), 'utf8');
     const bindIp = action === 'update' ? existing.bindIp !== false : req.bindIp !== false;
-    const script = buildRemoteScript({ gate, setup, publicKey, action: action === 'remove' ? 'remove' : 'install', bindIp, installPackages: !!req.installPackages });
+    const script = buildRemoteScript({ gate, setup, publicKey, action: action === 'remove' ? 'remove' : 'install', bindIp, installPackages: !!req.installPackages, rights: Array.isArray(req.rights) ? req.rights.filter((r) => RIGHTS.includes(r)) : null });
 
     const dir = await mkdtemp(path.join(this.tmp, 'disktool-'));
     let res;

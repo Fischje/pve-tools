@@ -118,6 +118,21 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       const d = diskDetail(engine, decodeURIComponent(m[1]));
       return d ? send(res, 200, d) : send(res, 404, { error: 'Platte unbekannt' });
     }
+    if ((m = /^\/api\/hosts\/([^/]+)\/snapshots$/.exec(url.pathname)) && req.method === 'POST') {
+      const hostId = decodeURIComponent(m[1]);
+      if (!engine.hosts.some((h) => h.id === hostId)) return send(res, 404, { error: 'Host unbekannt' });
+      const b = await readBody(req);
+      try {
+        if (b.action === 'mode') await engine.setSnapMode(hostId, b.mode);
+        else if (b.action === 'switch') await engine.setSnapSwitch(hostId, !!b.on);
+        else if (b.action === 'run') {
+          if (!['hourly', 'weekly', 'monthly'].includes(b.label)) throw new Error('Ungültige Bezeichnung');
+          const r = await engine.runSnapshot(hostId, b.label, { force: b.label === 'monthly', manual: true });
+          if (!r.ok) throw new Error(r.text || 'Lauf fehlgeschlagen');
+        } else throw new Error('Unbekannte Aktion');
+      } catch (e) { return send(res, 400, { error: e.message }); }
+      return send(res, 200, { ok: true });
+    }
     if ((m = /^\/api\/hosts\/([^/]+)\/(settings|poll|approval)$/.exec(url.pathname))) {
       const hostId = decodeURIComponent(m[1]);
       if (!engine.hosts.some((h) => h.id === hostId)) return send(res, 404, { error: 'Host unbekannt' });

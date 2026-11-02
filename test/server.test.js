@@ -342,3 +342,27 @@ test('Update-Schutz: Backup-Tabellen einer älteren Version werden ergänzt und 
   assert.equal(db2.taskGuests('U')[0].cause, null);
   db2.close();
 });
+
+test('Snapshot-Steuerung per API: übernehmen, Schalter, Lauf von Hand, Rechte und Eingaben werden geprüft', async () => {
+  const { call, close, engine } = await boot();
+  await engine.pollHost('pve', { force: true }); await engine.pollHost('router', { force: true });
+  const sc = async (id) => (await call('GET', '/api/backups')).json.hosts.find((h) => h.id === id).snapControl;
+  assert.equal((await sc('pve')).mode, 'cron');
+  assert.equal((await sc('pve')).allowed, true);
+  assert.equal((await sc('router')).allowed, false);
+  assert.equal((await call('POST', '/api/hosts/pve/snapshots', { action: 'mode', mode: 'tool' })).status, 200);
+  const after = await sc('pve');
+  assert.equal(after.mode, 'tool');
+  assert.ok(after.next.hourly && after.next.weekly && after.next.monthly);
+  assert.equal((await call('POST', '/api/hosts/pve/snapshots', { action: 'run', label: 'hourly' })).status, 200);
+  assert.equal((await sc('pve')).last.hourly.ok, true);
+  assert.equal((await call('POST', '/api/hosts/pve/snapshots', { action: 'switch', on: false })).status, 200);
+  const bad = await call('POST', '/api/hosts/pve/snapshots', { action: 'run', label: 'daily; id' });
+  assert.equal(bad.status, 400);
+  const noRight = await call('POST', '/api/hosts/router/snapshots', { action: 'mode', mode: 'tool' });
+  assert.equal(noRight.status, 400);
+  assert.match(noRight.json.error, /nicht freigegeben/);
+  assert.equal((await call('POST', '/api/hosts/nope/snapshots', { action: 'mode', mode: 'tool' })).status, 404);
+  assert.equal((await call('POST', '/api/hosts/pve/snapshots', { action: 'mode', mode: 'quatsch' })).status, 400);
+  await close();
+});

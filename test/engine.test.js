@@ -175,3 +175,55 @@ test('Skript-Version des Hosts wird gespeichert', async () => {
   assert.equal(db.getHostState('pve').gateVersion, EXPECTED_GATE_VERSION);
   assert.equal(db.getHostState('pbs').gateVersion, 3);
 });
+
+const calls = (world, id) => world.state.get(id).snapCalls ?? [];
+
+test('Snapshots durch das Tool: standardmäßig bleibt es beim Cron, nach der Übernahme löst das Tool aus (nur einmal je Slot)', async () => {
+  const { engine, world, advance } = setup();
+  await engine.pollHost('pve');
+  assert.deepEqual(engine.hostRights('pve'), ['snapshots']);
+  await engine.tickHost('pve');
+  assert.deepEqual(calls(world, 'pve'), [], 'ohne Übernahme löst das Tool nichts aus');
+  await engine.setSnapMode('pve', 'tool');
+  assert.deepEqual(calls(world, 'pve'), ['snap-cron off'], 'erst Cron aus');
+  await engine.tickHost('pve');
+  const first = calls(world, 'pve').filter((c) => c.startsWith('snap-run'));
+  assert.deepEqual(first.sort(), ['snap-run hourly', 'snap-run monthly force', 'snap-run weekly'], 'stündlich plus Nachholen von Woche und Monat');
+  await engine.tickHost('pve');
+  assert.equal(calls(world, 'pve').filter((c) => c.startsWith('snap-run')).length, 3, 'im selben Slot nicht noch einmal');
+  advance(60); // nächster Stunden-Slot
+  await engine.pollHost('pve');
+  await engine.tickHost('pve');
+  assert.equal(calls(world, 'pve').filter((c) => c === 'snap-run hourly').length, 2);
+  await engine.setSnapMode('pve', 'cron');
+  assert.equal(calls(world, 'pve').at(-1), 'snap-cron on');
+  assert.equal(engine.snapCtl('pve').mode, 'cron');
+});
+
+test('Snapshots: ohne freigegebenes Recht keine Übernahme; Montag (Pausentag) wird nichts ausgelöst', async () => {
+  const { engine, world } = setup();
+  await engine.pollHost('router');
+  await assert.rejects(() => engine.setSnapMode('router', 'tool'), /nicht freigegeben/);
+  assert.deepEqual(calls(world, 'router'), []);
+  const m = setup(new Date(2026, 10, 2, 9, 0)); // Montag
+  await m.engine.pollHost('pve'); await m.engine.pollBackups('pve', m.engine.client('pve'), m.clock(), true);
+  await m.engine.setSnapMode('pve', 'tool');
+  await m.engine.tickHost('pve');
+  assert.equal(calls(m.world, 'pve').filter((c) => c.startsWith('snap-run')).length, 0);
+});
+
+test('Snapshots: Fehlschlag wird gemerkt und erst nach 15 Minuten wiederholt', async () => {
+  const { engine, world, advance } = setup();
+  await engine.pollHost('pve');
+  await engine.setSnapMode('pve', 'tool');
+  world.state.get('pve').snapFail = true;
+  await engine.tickHost('pve');
+  const n = () => calls(world, 'pve').filter((c) => c === 'snap-run hourly').length;
+  assert.equal(n(), 1);
+  assert.equal(engine.snapLast('pve').hourly.ok, false);
+  advance(5); await engine.tickHost('pve');
+  assert.equal(n(), 1, 'nach 5 min noch nicht wieder');
+  world.state.get('pve').snapFail = false;
+  advance(15); await engine.pollHost('pve'); await engine.tickHost('pve');
+  assert.equal(engine.snapLast('pve').hourly.ok, true);
+});

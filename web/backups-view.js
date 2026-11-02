@@ -38,6 +38,25 @@ function hostPanel(b, host, data) {
       as.cron.length ? `Zeitplan: ${as.cron.map((c) => c.text).join('; ')}.` : ''].join('')) : h('div', { class: 'sub' }, 'Auf diesem Host wurde /usr/local/sbin/autosnap-run nicht gefunden.'),
     as.log?.length ? h('details', {}, h('summary', {}, `Letzte Meldungen (${as.log.length})`), h('pre', { class: 'log' }, as.log.join('\n'))) : null) : null;
 
+  const sc = host.snapControl;
+  const LBL = { hourly: 'stündlich', weekly: 'wöchentlich', monthly: 'monatlich' };
+  const post = (body, okText) => ctx.act(() => ctx.api('POST', `/api/hosts/${host.id}/snapshots`, body), okText);
+  const hostObj = data.hosts.find((x) => x.id === host.id);
+  const ctlBox = !as?.known || !sc ? null : !sc.allowed
+    ? h('div', { class: 'finding info' }, h('b', {}, 'Snapshot-Auslösung durch das Tool: noch nicht freigegeben'),
+        h('div', { class: 'sub' }, 'Heute löst der Cron auf dem Host die Snapshots aus. Wenn das Tool das übernehmen soll, braucht es ein zusätzliches Recht auf diesem Host. Das gibst du mit dem root-Passwort frei (Reiter „Hosts einrichten“, „Skript aktualisieren“, Haken „Snapshots auslösen erlauben“). Das Prüfskript muss dafür Version 6 haben.'),
+        hostObj ? h('div', { class: 'actions' }, h('button', { onclick: () => ctx.openUpdate(hostObj) }, 'Recht freigeben')) : null)
+    : h('div', { class: `finding ${sc.mode === 'tool' ? 'ok' : 'info'}` },
+        h('b', {}, sc.mode === 'tool' ? 'Das Tool löst die Snapshots aus (Cron auf dem Host ist aus)' : 'Die Snapshots löst der Cron auf dem Host aus'),
+        sc.cronStillActive ? h('div', { class: 'sub bad' }, 'Achtung: Auf dem Host ist der Cron noch aktiv. Es können doppelte Snapshots entstehen. „Das Tool übernimmt“ erneut wählen.') : null,
+        sc.mode === 'tool' ? h('div', { class: 'sub' }, ['hourly', 'weekly', 'monthly'].map((k) => `${LBL[k]}: zuletzt ${sc.last[k] ? `${fmtDT(sc.last[k].ts)}${sc.last[k].ok ? '' : ' (Fehler)'}` : 'noch nie durch das Tool'}, nächster ${fmtDT(sc.next[k])}`).join(' · ')) : h('div', { class: 'sub' }, 'Wenn das Tool übernimmt, wird der Cron auf dem Host ausgeschaltet (umbenannt, nicht gelöscht). Verpasste wöchentliche und monatliche Läufe holt das Tool nach, sobald der Host läuft. Aufbewahrung, Auswahl der Gäste und das Löschen alter Snapshots regelt weiter das autosnap-Skript.'),
+        Object.values(sc.last).some((x) => !x.ok) ? h('div', { class: 'sub bad' }, `Letzter Fehler: ${Object.values(sc.last).find((x) => !x.ok).text}`) : null,
+        h('div', { class: 'actions' },
+          sc.mode === 'tool' ? h('button', { onclick: () => { if (confirm('Wieder den Cron auf dem Host verwenden?')) post({ action: 'mode', mode: 'cron' }, 'Cron auf dem Host ist wieder aktiv.'); } }, 'Zurück zum Cron')
+            : h('button', { class: 'primary', onclick: () => { if (confirm('Das Tool löst die Snapshots künftig aus und schaltet den Cron auf dem Host aus. Fortfahren?')) post({ action: 'mode', mode: 'tool' }, 'Das Tool löst die Snapshots jetzt aus.'); } }, 'Das Tool übernimmt'),
+          h('button', { onclick: () => post({ action: 'switch', on: !as.enabled }, as.enabled ? 'Snapshots ausgeschaltet.' : 'Snapshots eingeschaltet.') }, as.enabled ? 'Snapshots ausschalten' : 'Snapshots einschalten'),
+          h('button', { onclick: () => { if (confirm('Jetzt einen stündlichen Snapshot-Lauf auslösen?')) post({ action: 'run', label: 'hourly' }, 'Lauf ausgelöst.'); } }, 'Jetzt stündlichen Lauf auslösen')));
+
   const run = host.runningJob;
   const runBox = run ? h('div', { class: 'finding ok' }, h('b', {}, `Ein Backup-Lauf läuft gerade (gestartet ${fmtDT(run.start)}, ${ago(run.start, now)}).`), h('div', { class: 'sub' }, 'Die Ergebnisse dieses Laufs erscheinen hier, sobald er beendet ist. Die roten Hinweise unten stammen aus dem davor beendeten Lauf.')) : null;
   const lr = host.lastRun;
@@ -61,7 +80,7 @@ function hostPanel(b, host, data) {
       h('td', {}, t.parsed ? [`${t.ok} gesichert${t.failed ? `, ${t.failed} fehlgeschlagen` : ''}${t.interrupted ? `, ${t.interrupted} unterbrochen` : ''}`, t.summary.cause === 'verbindung' ? h('div', { class: 'sub bad' }, 'Verbindung zum PBS') : null] : h('span', { class: 'sub' }, t.running ? 'läuft …' : 'Protokoll wird gelesen …')),
       h('td', {}, t.guests.length ? h('details', {}, h('summary', {}, `${t.guests.length} Gäste`), h('ul', { class: 'plain' }, t.guests.map((x) => h('li', {}, resultPill(x.result), ` ${x.vmid} ${x.name ?? ''}`, x.seconds ? h('span', { class: 'sub' }, ` · ${fmtMin(Math.max(1, Math.round(x.seconds / 60)))}`) : '', x.note ? h('div', { class: 'sub bad' }, x.note) : null, x.detail ? h('details', {}, h('summary', {}, 'Protokollzeilen'), h('pre', { class: 'log' }, x.detail.replace(/ \| /g, '\n'))) : null)))) : '')))))) : h('p', { class: 'sub' }, 'Noch keine Backup-Läufe auf diesem Host gelesen. Die Aufgabenliste von Proxmox reicht einige Wochen zurück.');
 
-  return h('section', { class: 'panel' }, head, runBox, lrBox, asBox,
+  return h('section', { class: 'panel' }, head, runBox, lrBox, asBox, ctlBox,
     h('h3', {}, `Gäste (${host.guests.length})`), host.guests.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['ID', 'Gast', 'Snapshots (vorhanden / vorgesehen)', 'Letztes Backup', 'Hinweise'].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Keine Gäste gelesen.'),
     h('h3', {}, 'Backup-Läufe'), runs);
 }

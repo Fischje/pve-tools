@@ -287,12 +287,13 @@ function wizardPanel() {
     const bind = h('input', { type: 'checkbox', checked: true });
     const pkgs = h('input', { type: 'checkbox' });
     const rem = h('input', { type: 'checkbox' });
+    const snapRight = h('input', { type: 'checkbox', checked: (w.host?.rights ?? []).includes('snapshots') });
     const btn = h('button', { class: 'primary', onclick: async () => {
       msg.textContent = '';
       if (!ok.checked) { msg.textContent = 'Bitte bestätige zuerst den Fingerabdruck.'; return; }
       if (!pw.value) { msg.textContent = 'Bitte das root-Passwort des Hosts eingeben.'; return; }
       btn.disabled = true; btn.textContent = 'Läuft …';
-      const body = { action: w.mode === 'remove' ? 'remove' : 'install', fingerprint: chosen, password: pw.value, bindIp: bind.checked, installPackages: pkgs.checked, removeFromList: rem.checked };
+      const body = { action: w.mode === 'remove' ? 'remove' : 'install', fingerprint: chosen, password: pw.value, bindIp: bind.checked, installPackages: pkgs.checked, removeFromList: rem.checked, rights: w.mode === 'remove' ? undefined : (snapRight.checked ? ['snapshots'] : []) };
       if (w.mode === 'new') Object.assign(body, w.form, { address: w.fp.address, port: w.fp.port }); else body.hostId = w.host.id;
       pw.value = '';
       try { w.result = await api('POST', '/api/setup/run', body); } catch (e) { w.result = { ok: false, error: e.message, log: '' }; }
@@ -306,7 +307,8 @@ function wizardPanel() {
       h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'root-Passwort des Hosts (wird nur für diese Einrichtung verwendet und nicht gespeichert)', pw)),
       w.mode === 'remove' ? h('label', {}, rem, ' Den Host danach auch aus dieser Liste löschen') : [
         h('label', {}, bind, ' Schlüssel an die IP dieses Tools binden (empfohlen: der Zugang gilt dann nur von hier)'),
-        h('br'), h('label', {}, pkgs, ' Fehlende Pakete (sudo, smartmontools) auf dem Host installieren')],
+        h('br'), h('label', {}, pkgs, ' Fehlende Pakete (sudo, smartmontools) auf dem Host installieren'),
+        h('br'), h('label', {}, snapRight, ' Snapshots auslösen erlauben (nur Proxmox-Hosts): das Tool darf dann das vorhandene autosnap-Skript starten, den Snapshot-Schalter setzen und den Cron von proxmox-autosnap aus- und einschalten. Sonst nichts.')],
       h('p', { class: 'sub' }, w.mode === 'remove' ? 'Entfernt den Benutzer diskmon, das Prüfskript und die sudo-Regel vom Host.' : 'Legt auf dem Host den Benutzer „diskmon“, das Prüfskript unter /etc/diskmon und eine sudo-Regel nur für dieses Skript an. Am Proxmox-Kern ändert sich nichts.'),
       msg, h('div', { class: 'row' }, btn, h('button', { onclick: () => { w.step = 1; render(); } }, 'Zurück')));
   } else {

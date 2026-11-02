@@ -228,3 +228,13 @@ test('Aktualisieren: meldet der Host danach noch die alte Version, ist das ein F
   assert.equal(r.ok, false);
   assert.match(r.error, /Version 1/);
 });
+
+test('Rechtegruppen: nur bekannte Gruppen, ohne Angabe bleibt die Rechtedatei unverändert', async () => {
+  const { buildRemoteScript, RIGHTS } = await import('../src/provision.js');
+  const base = { gate: '#gate', setup: '#setup', publicKey: 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA test', action: 'install', bindIp: false, installPackages: false };
+  assert.deepEqual(RIGHTS, ['snapshots']);
+  assert.ok(!buildRemoteScript(base).includes('DISKMON_RECHTE'));
+  assert.match(buildRemoteScript({ ...base, rights: ['snapshots'] }), /export DISKMON_RECHTE='snapshots'/);
+  assert.match(buildRemoteScript({ ...base, rights: [] }), /export DISKMON_RECHTE=''/);
+  assert.throws(() => buildRemoteScript({ ...base, rights: ['snapshots; id'] }), /Unbekannte Rechtegruppe/);
+});

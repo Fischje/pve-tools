@@ -55,6 +55,16 @@ export class HostClient {
   async backupTaskLog(upid) { const r = await this.t.run(`tasklog ${upid}`, 120000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Protokoll nicht lesbar'); return parseVzdumpLog(r.stdout); }
   async autosnap() { const r = await this.t.run('autosnap', 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Snapshot-Zustand nicht lesbar'); return parseAutosnap(r.stdout); }
 
+  /** Freigegebene Rechtegruppen dieses Hosts (Prüfskript ab Version 6). */
+  async rights() { const r = await this.t.run('rechte', 15000); return r.code === 0 ? r.stdout.split('\n').map((x) => x.trim()).filter(Boolean) : []; }
+  /** Snapshot-Lauf mit dem vorhandenen autosnap-Skript. Gibt Ausgabe und Rückgabecode zurück, wirft nicht bei Fehlercode. */
+  async snapRun(label, { force = false } = {}) {
+    const r = await this.t.run(`snap-run ${label}${force ? ' force' : ''}`, 15 * 60000);
+    return { ok: r.code === 0, code: r.code, text: `${r.stdout}${r.stderr}`.trim().slice(-600) };
+  }
+  async snapSwitch(on) { const r = await this.t.run(`snap-switch ${on ? 'on' : 'off'}`, 20000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Schalter nicht gesetzt'); }
+  async snapCron(action) { const r = await this.t.run(`snap-cron ${action}`, 20000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Cron nicht geändert'); return r.stdout.trim(); }
+
   /** Kernel-Meldungen zu Verbindungsfehlern der letzten 48 h (braucht Prüfskript ab Version 5). */
   async kernelLog() { const r = await this.t.run('kernel', 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Kernel-Meldungen nicht lesbar'); return parseKernelLog(r.stdout); }
 

@@ -1,4 +1,5 @@
 // Bereitet die Daten für die Oberfläche auf (Bewertung, nächste Termine, Banner, Zusammenfassung).
+import { nextSlots } from './snapshots.js';
 import { rate, LEVEL_LABEL, LEVEL_ORDER } from './rating.js';
 import { testWindow, nextPlanned, blockedIntervals, dayAllowed, dayKey, DEFAULT_SETTINGS } from './schedule.js';
 import { ratePool } from './zfs.js';
@@ -103,7 +104,7 @@ export function overview(engine) {
       lastPoll: iso(hs?.lastPoll), uptimeSec: st.uptimeSec, pools, linkFindings: engine.linkFindings(host.id),
       window: { open: win.open, reason: win.reason, softEnd: iso(win.softEnd), minutesLeft: win.minutesLeft },
       hostSummary: { reachable: !!hs?.reachable },
-      gate: { version: hs?.gateVersion ?? null, expected: EXPECTED_GATE_VERSION, outdated: !!hs?.reachable && hs?.gateVersion != null && hs.gateVersion < EXPECTED_GATE_VERSION },
+      rights: engine.hostRights(host.id), gate: { version: hs?.gateVersion ?? null, expected: EXPECTED_GATE_VERSION, outdated: !!hs?.reachable && hs?.gateVersion != null && hs.gateVersion < EXPECTED_GATE_VERSION },
       decision: dec ? { action: dec.action, reason: dec.reason } : null,
       banner: bannerFor(host, s, st, hs, now),
       disks,
@@ -181,6 +182,18 @@ const lv = (l) => ['ok', 'info', 'watch', 'replace'].indexOf(l);
  * Es wird nur beobachtet. Ob ein Gast ein Backup bekommen soll, weiß das Tool in dieser Stufe nicht (die Ausschlussliste steht im Orchestrator),
  * deshalb gibt es nur dann einen Hinweis, wenn ein Gast früher gesichert wurde und jetzt zu lange nicht mehr.
  */
+/** Zustand der Snapshot-Auslösung durch das Tool für die Oberfläche. */
+function snapControl(engine, hostId, as, now) {
+  const ctl = engine.snapCtl(hostId), rights = engine.hostRights(hostId), last = engine.snapLast(hostId);
+  const next = nextSlots(new Date(now), as?.pauseDay ?? null);
+  return {
+    mode: ctl.mode, allowed: rights.includes('snapshots'), rights,
+    last: Object.fromEntries(Object.entries(last).map(([k, v]) => [k, { ts: iso(v.ts), ok: v.ok, text: v.text }])),
+    next: Object.fromEntries(Object.entries(next).map(([k, v]) => [k, iso(v)])),
+    cronStillActive: ctl.mode === 'tool' && !!as?.cron?.length,
+  };
+}
+
 export function backupOverview(engine) {
   const now = engine.now(), t = now.getTime(), db = engine.db;
   const hosts = engine.hosts.map((host) => {
@@ -232,7 +245,7 @@ export function backupOverview(engine) {
     });
     return {
       id: host.id, label: host.label ?? host.id, reachable: !!hs?.reachable, supported, gate: { version: hs?.gateVersion ?? null, expected: EXPECTED_GATE_VERSION },
-      autosnap: as ? { ...as, ts: iso(as.ts), pauseToday } : null, guests, tasks, runningJob: tasks.find((x) => x.running) ?? null,
+      autosnap: as ? { ...as, ts: iso(as.ts), pauseToday } : null, snapControl: snapControl(engine, host.id, as, t), guests, tasks, runningJob: tasks.find((x) => x.running) ?? null,
       lastRun: tasks.find((x) => !x.running && x.parsed) ?? null, polledAt: iso(Number(db.getSetting(`backups_poll:${host.id}`) ?? 0) || null),
     };
   });

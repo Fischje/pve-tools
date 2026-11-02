@@ -49,6 +49,13 @@ passwd -l "$BENUTZER" >/dev/null
 
 install -d -m 0755 -o root -g root "$ZIEL"
 install -m 0755 -o root -g root "$HIER/gate.sh" "$ZIEL/gate.sh"
+# Rechtegruppen für schreibende Befehle (z. B. "snapshots"). Nur setzen, wenn DISKMON_RECHTE gesetzt ist, sonst bleibt die Datei, wie sie ist.
+if [[ -n "${DISKMON_RECHTE+x}" ]]; then
+  [[ "$DISKMON_RECHTE" =~ ^[a-z,-]*$ ]] || { echo "DISKMON_RECHTE: ungültiger Wert" >&2; exit 1; }
+  : > "$ZIEL/rechte"
+  for r in ${DISKMON_RECHTE//,/ }; do echo "$r" >> "$ZIEL/rechte"; done
+  chmod 0644 "$ZIEL/rechte"
+fi
 
 tmp="$(mktemp)"
 cat > "$tmp" <<SUDO
