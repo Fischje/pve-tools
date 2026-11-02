@@ -47,26 +47,49 @@ export function parseTasks(text) {
 
 const secs = (hms) => { const p = String(hms).split(':').map(Number); return p.length === 3 && p.every(Number.isFinite) ? p[0] * 3600 + p[1] * 60 + p[2] : null; };
 
+// Hinweise auf eine fehlende oder abgebrochene Verbindung zum Backup-Ziel (PBS aus, zwischendurch heruntergefahren, Netzwerk).
+const CONN_RE = /error trying to connect|tcp connect error|connection (?:refused|reset|closed|timed out)|broken pipe|no route to host|network is unreachable|connect failed|client error \(Connect\)|timed out/i;
+export const failureCause = (text) => (CONN_RE.test(String(text ?? '')) ? 'verbindung' : 'sonstiges');
+const clean = (l) => String(l).replace(/^(INFO|ERROR|WARN):\s*/, '').trim();
+
 /**
  * Protokoll einer vzdump-Aufgabe -> Ergebnis je Gast.
  * Erkennt die Zeilen „Starting Backup of VM 109 (lxc)“, „Finished Backup of VM 109 (00:01:22)“ und „ERROR: Backup of VM 112 failed - …“.
+ * Bei einem Fehlschlag wird der Grund aus den Zeilen des Gastes gelesen: Meist steht er VOR der letzten ERROR-Zeile (z. B. „error trying to connect“).
  * Gäste, die begonnen haben, aber weder fertig noch fehlgeschlagen sind (Abbruch), gelten als „unterbrochen“.
  */
 export function parseVzdumpLog(text) {
   const raw = json(text);
   const lines = Array.isArray(raw) ? raw.map((l) => (typeof l === 'string' ? l : l?.t ?? '')) : String(text ?? '').split('\n');
-  const guests = new Map(); let cur = null, job = null;
+  const guests = new Map(); const block = new Map(); let cur = null, job = null;
+  const note = (id, l) => { if (id != null) (block.get(id) ?? block.set(id, []).get(id)).push(l); };
   for (const l of lines) {
     let m;
-    if ((m = /Starting Backup of VM (\d+) \((\w+)\)/.exec(l))) { cur = Number(m[1]); guests.set(cur, { vmid: cur, type: m[2], result: 'interrupted', seconds: null, note: '' }); continue; }
-    if ((m = /Finished Backup of VM (\d+) \(([\d:]+)\)/.exec(l))) { const g = guests.get(Number(m[1])) ?? { vmid: Number(m[1]), type: '?', note: '' }; g.result = 'ok'; g.seconds = secs(m[2]); guests.set(g.vmid, g); continue; }
-    if ((m = /ERROR: Backup of VM (\d+) failed(?: - (.*))?/.exec(l))) { const g = guests.get(Number(m[1])) ?? { vmid: Number(m[1]), type: '?', seconds: null }; g.result = 'failed'; g.note = (m[2] ?? '').trim().slice(0, 300); guests.set(g.vmid, g); continue; }
+    if ((m = /Starting Backup of VM (\d+) \((\w+)\)/.exec(l))) { cur = Number(m[1]); guests.set(cur, { vmid: cur, type: m[2], result: 'interrupted', seconds: null, note: '', cause: null }); block.set(cur, []); continue; }
+    if ((m = /Finished Backup of VM (\d+) \(([\d:]+)\)/.exec(l))) { const g = guests.get(Number(m[1])) ?? { vmid: Number(m[1]), type: '?', note: '', cause: null }; g.result = 'ok'; g.seconds = secs(m[2]); guests.set(g.vmid, g); cur = null; continue; }
+    if ((m = /ERROR: Backup of VM (\d+) failed(?: - (.*))?/.exec(l))) {
+      const id = Number(m[1]); const g = guests.get(id) ?? { vmid: id, type: '?', seconds: null, cause: null };
+      const lines2 = [...(block.get(id) ?? []), l];
+      g.result = 'failed'; g.cause = failureCause(lines2.join('\n'));
+      const conn = lines2.find((x) => CONN_RE.test(x));
+      g.note = clean(conn ?? m[2] ?? '').slice(0, 300);
+      g.detail = lines2.slice(-6).map(clean).join(' | ').slice(0, 600);
+      guests.set(id, g); cur = null; continue;
+    }
     if (/Backup job finished successfully/.test(l)) job = 'ok';
     else if (/Backup job finished with errors/.test(l)) job = 'errors';
     else if (/^TASK OK/.test(l)) job ??= 'ok';
     else if (/^TASK ERROR/.test(l)) job ??= 'errors';
+    else note(cur, l);
   }
   return { guests: [...guests.values()], job };
+}
+
+/** Zusammenfassung eines Laufs: wie viele Gäste, wie viele davon wegen der Verbindung zum Ziel fehlgeschlagen. */
+export function summarizeRun(guests) {
+  const failed = guests.filter((g) => g.result === 'failed');
+  const conn = failed.filter((g) => g.cause === 'verbindung');
+  return { total: guests.length, failed: failed.length, connection: conn.length, cause: failed.length >= 2 && conn.length >= Math.ceil(failed.length * 0.7) ? 'verbindung' : null };
 }
 
 const CRON_RE = /^(\S+\s+\S+\s+\S+\s+\S+\s+\S+)\s+(\S+)\s+(.+)$/;

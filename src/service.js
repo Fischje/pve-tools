@@ -3,6 +3,7 @@ import { rate, LEVEL_LABEL, LEVEL_ORDER } from './rating.js';
 import { testWindow, nextPlanned, blockedIntervals, dayAllowed, dayKey, DEFAULT_SETTINGS } from './schedule.js';
 import { ratePool } from './zfs.js';
 import { summarize } from './stats.js';
+import { summarizeRun } from './backups.js';
 import { EXPECTED_GATE_VERSION } from './gate-version.js';
 
 const iso = (d) => (d ? new Date(d).toISOString() : null);
@@ -214,21 +215,25 @@ export function backupOverview(engine) {
       }
       const bk = lastBk.get(g.vmid);
       const okAt = lastOk.get(g.vmid) ?? null;
-      const backup = bk ? { result: bk.result, at: iso(bk.start), seconds: bk.seconds, note: bk.note, lastOkAt: iso(okAt) } : null;
-      if (bk?.result === 'failed') add('replace', `Letztes Backup fehlgeschlagen${bk.note ? `: ${bk.note.slice(0, 120)}` : ''}`);
+      const backup = bk ? { result: bk.result, at: iso(bk.start), seconds: bk.seconds, note: bk.note, cause: bk.cause ?? null, lastOkAt: iso(okAt) } : null;
+      if (bk?.result === 'failed') {
+        add('replace', bk.cause === 'verbindung' ? 'Letztes Backup fehlgeschlagen: Verbindung zum PBS fehlte oder brach ab (Einzelheiten beim Backup-Lauf)' : `Letztes Backup fehlgeschlagen${bk.note ? `: ${bk.note.slice(0, 120)}` : ''}`);
+      }
       else if (okAt && (t - okAt) / DAY_MS > 9) add('watch', `Kein Backup seit ${Math.round((t - okAt) / DAY_MS)} Tagen (üblich: wöchentlich montags)`);
       const level = findings.reduce((a, f) => (lv(f.level) > lv(a) ? f.level : a), 'ok');
       return { vmid: g.vmid, type: g.type, name: g.name, status: g.status, tags: g.tags, tagged, snapshots, backup, findings, level };
     });
     const tasks = db.tasksOf(host.id, 12).map((tk) => {
       const gs = tk.parsed ? db.taskGuests(tk.upid) : [];
-      return { upid: tk.upid, start: iso(tk.start), end: iso(tk.end), minutes: tk.start && tk.end ? Math.round((tk.end - tk.start) / 60000) : null, status: tk.status, job: tk.job,
-        parsed: !!tk.parsed, ok: gs.filter((x) => x.result === 'ok').length, failed: gs.filter((x) => x.result === 'failed').length, interrupted: gs.filter((x) => x.result === 'interrupted').length,
-        guests: gs.map((x) => ({ vmid: x.vmid, type: x.type, result: x.result, seconds: x.seconds, note: x.note, name: guests.find((g) => g.vmid === x.vmid)?.name ?? null })) };
+      const sum = summarizeRun(gs);
+      return { upid: tk.upid, start: iso(tk.start), end: iso(tk.end), running: !tk.end && tk.start != null && (t - tk.start) < 12 * 3600e3, minutes: tk.start && tk.end ? Math.round((tk.end - tk.start) / 60000) : null, status: tk.status, job: tk.job,
+        summary: sum, parsed: !!tk.parsed, ok: gs.filter((x) => x.result === 'ok').length, failed: gs.filter((x) => x.result === 'failed').length, interrupted: gs.filter((x) => x.result === 'interrupted').length,
+        guests: gs.map((x) => ({ vmid: x.vmid, type: x.type, result: x.result, seconds: x.seconds, note: x.note, cause: x.cause ?? null, detail: x.detail ?? null, name: guests.find((g) => g.vmid === x.vmid)?.name ?? null })) };
     });
     return {
       id: host.id, label: host.label ?? host.id, reachable: !!hs?.reachable, supported, gate: { version: hs?.gateVersion ?? null, expected: EXPECTED_GATE_VERSION },
-      autosnap: as ? { ...as, ts: iso(as.ts), pauseToday } : null, guests, tasks, polledAt: iso(Number(db.getSetting(`backups_poll:${host.id}`) ?? 0) || null),
+      autosnap: as ? { ...as, ts: iso(as.ts), pauseToday } : null, guests, tasks, runningJob: tasks.find((x) => x.running) ?? null,
+      lastRun: tasks.find((x) => !x.running && x.parsed) ?? null, polledAt: iso(Number(db.getSetting(`backups_poll:${host.id}`) ?? 0) || null),
     };
   });
   // Kennzahlen
@@ -237,7 +242,7 @@ export function backupOverview(engine) {
   return {
     now: iso(now), hosts, lastRun: allTasks[0] ?? null,
     kpi: {
-      guests: guestsAll.length, snapshotsOn: hosts.filter((h) => h.autosnap?.enabled).length, snapshotsOff: hosts.filter((h) => h.autosnap?.known && !h.autosnap.enabled).length,
+      failedCause: hosts.some((h) => h.lastRun?.summary?.cause === 'verbindung') ? 'verbindung' : null, guests: guestsAll.length, snapshotsOn: hosts.filter((h) => h.autosnap?.enabled).length, snapshotsOff: hosts.filter((h) => h.autosnap?.known && !h.autosnap.enabled).length,
       problems: guestsAll.filter((g) => lv(g.level) >= lv('watch')).length, failedBackups: guestsAll.filter((g) => g.backup?.result === 'failed').length,
       runs30: allTasks.filter((x) => (t - Date.parse(x.start)) / DAY_MS <= 30).length,
     },

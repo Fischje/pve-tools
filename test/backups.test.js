@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseGuests, parseSnapshots, parseTasks, parseVzdumpLog, parseAutosnap, describeCron } from '../src/backups.js';
+import { parseGuests, parseSnapshots, parseTasks, parseVzdumpLog, parseAutosnap, describeCron, summarizeRun, failureCause } from '../src/backups.js';
 
 test('Gäste: LXC und VMs mit Tags, Status und Vorlagen', () => {
   const g = parseGuests('lxc\t[{"vmid":109,"name":"nginx","status":"running","tags":"autosnap;community-script;proxy"},{"vmid":141,"name":"media","status":"stopped","tags":""}]\nqemu\t[{"vmid":100,"name":"vm","status":"running","template":1}]\nmuell\t[]\nlxc\tkaputt');
@@ -88,4 +88,37 @@ test('autosnap: Schalter, Aufbewahrung, Pausentag, Cron und Meldungen aus deinen
 test('Cron-Beschreibung', () => {
   assert.equal(describeCron('0 3 * * 1'), 'wöchentlich Mo 03:00');
   assert.equal(describeCron('*/5 * * * *'), '*/5 * * * *');
+});
+
+// Fehlerbilder wie in deiner Anzeige: Die Ursache steht bei LXC meist VOR der letzten ERROR-Zeile.
+const FAIL = [
+  'INFO: starting new backup job: vzdump --all 1 --storage pbs --mode snapshot --compress zstd',
+  'INFO: Starting Backup of VM 101 (qemu)', 'INFO: status = running',
+  'ERROR: Backup of VM 101 failed - backup write data failed: command error: write_data upload error: connection closed because of a broken pipe',
+  'INFO: Starting Backup of VM 118 (lxc)', 'INFO: create storage snapshot \'vzdump\'',
+  'ERROR: Error: error trying to connect: tcp connect error: No route to host (os error 113)', 'INFO: remove vzdump snapshot',
+  "ERROR: Backup of VM 118 failed - command 'lxc-usernsexec -m u:0:100000:65536 -m g:0:100000:65536 -- /usr/bin/proxmox-backup-client backup --crypt-mode=n root.pxar:/mnt' failed: exit code 255",
+  'INFO: Starting Backup of VM 140 (qemu)', "ERROR: Backup of VM 140 failed - VM 140 qmp command 'backup' failed - backup connect failed: command error: client error (Connect)",
+  'INFO: Starting Backup of VM 150 (lxc)', 'ERROR: Backup of VM 150 failed - unable to create snapshot: out of space',
+  'INFO: Backup job finished with errors', 'TASK ERROR: job errors',
+];
+test('Fehlgrund: Verbindungsabbruch wird erkannt, auch wenn er VOR der letzten ERROR-Zeile steht', () => {
+  const r = parseVzdumpLog(FAIL.join('\n'));
+  const by = Object.fromEntries(r.guests.map((g) => [g.vmid, g]));
+  assert.equal(by[101].cause, 'verbindung');
+  assert.match(by[101].note, /broken pipe/);
+  assert.equal(by[118].cause, 'verbindung', 'LXC: Grund steht in der Zeile davor');
+  assert.match(by[118].note, /tcp connect error/);
+  assert.match(by[118].detail, /remove vzdump snapshot/);
+  assert.equal(by[140].cause, 'verbindung');
+  assert.equal(by[150].cause, 'sonstiges');
+  assert.match(by[150].note, /out of space/);
+});
+
+test('Lauf-Zusammenfassung: Ursache „Verbindung“ erst, wenn die meisten Fehlschläge dazu passen', () => {
+  const r = parseVzdumpLog(FAIL.join('\n'));
+  assert.deepEqual(summarizeRun(r.guests), { total: 4, failed: 4, connection: 3, cause: 'verbindung' });
+  assert.equal(summarizeRun([{ result: 'failed', cause: 'sonstiges' }, { result: 'failed', cause: 'verbindung' }, { result: 'ok' }]).cause, null);
+  assert.equal(summarizeRun([{ result: 'failed', cause: 'verbindung' }, { result: 'ok' }]).cause, null, 'ein einzelner Fehlschlag macht noch keinen Verbindungsausfall');
+  assert.equal(failureCause('alles gut'), 'sonstiges');
 });

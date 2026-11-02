@@ -38,6 +38,16 @@ function hostPanel(b, host, data) {
       as.cron.length ? `Zeitplan: ${as.cron.map((c) => c.text).join('; ')}.` : ''].join('')) : h('div', { class: 'sub' }, 'Auf diesem Host wurde /usr/local/sbin/autosnap-run nicht gefunden.'),
     as.log?.length ? h('details', {}, h('summary', {}, `Letzte Meldungen (${as.log.length})`), h('pre', { class: 'log' }, as.log.join('\n'))) : null) : null;
 
+  const run = host.runningJob;
+  const runBox = run ? h('div', { class: 'finding ok' }, h('b', {}, `Ein Backup-Lauf läuft gerade (gestartet ${fmtDT(run.start)}, ${ago(run.start, now)}).`), h('div', { class: 'sub' }, 'Die Ergebnisse dieses Laufs erscheinen hier, sobald er beendet ist. Die roten Hinweise unten stammen aus dem davor beendeten Lauf.')) : null;
+  const lr = host.lastRun;
+  const lrBox = lr && lr.summary.failed > 0 ? h('div', { class: 'finding critical' },
+    h('b', {}, `Der letzte beendete Backup-Lauf (${fmtDT(lr.start)}, ${lr.minutes != null ? fmtMin(lr.minutes) : '–'}) hat ${lr.summary.failed} von ${lr.summary.total} Gästen nicht gesichert.`),
+    lr.summary.cause === 'verbindung'
+      ? h('div', {}, 'Ursache laut Protokoll: Die Verbindung zum PBS fehlte oder brach ab („connect“, „broken pipe“). Das passiert, wenn der PBS aus ist oder während des Laufs heruntergefahren wird. ',
+        lr.minutes != null && lr.summary.total > 0 && lr.minutes < lr.summary.total * 0.5 ? `Der Lauf dauerte nur ${fmtMin(lr.minutes)} für ${lr.summary.total} Gäste, das ist auffällig kurz. ` : '', 'Prüfe, wann der PBS in dieser Zeit an- und ausgegangen ist.')
+      : h('div', {}, 'Die Gründe stehen unten bei den einzelnen Gästen und im Protokoll des Laufs.')) : null;
+
   const keep = as?.keep ?? {};
   const rows = [...host.guests].sort((a, c) => ['replace', 'watch', 'info', 'ok'].indexOf(a.level) - ['replace', 'watch', 'info', 'ok'].indexOf(c.level) || a.vmid - c.vmid).map((g) => h('tr', {},
     h('td', {}, g.vmid), h('td', {}, h('div', { class: 'model' }, g.name), h('div', { class: 'sub' }, `${g.type === 'lxc' ? 'LXC' : 'VM'} · ${g.status === 'running' ? 'läuft' : g.status === 'stopped' ? 'gestoppt' : g.status}`)),
@@ -46,12 +56,12 @@ function hostPanel(b, host, data) {
     h('td', {}, g.findings.length ? g.findings.map((f) => h('div', { class: `sub ${f.level === 'replace' ? 'bad' : ''}` }, f.text)) : h('span', { class: 'okmsg' }, '✔'))));
 
   const runs = host.tasks.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Start', 'Dauer', 'Ergebnis', 'Gäste', 'Einzelheiten'].map((t) => h('th', {}, t)))),
-    h('tbody', {}, host.tasks.map((t) => h('tr', {}, h('td', {}, fmtDT(t.start)), h('td', {}, t.minutes != null ? fmtMin(t.minutes) : (t.end ? '–' : 'läuft')),
+    h('tbody', {}, host.tasks.map((t) => h('tr', {}, h('td', {}, fmtDT(t.start)), h('td', {}, t.minutes != null ? fmtMin(t.minutes) : (t.running ? 'läuft' : '–')),
       h('td', {}, t.status ? h('span', { class: `pill ${t.status === 'OK' ? 'ok' : /warn/i.test(t.status) ? 'watch' : 'critical'}` }, t.status === 'OK' ? 'in Ordnung' : t.status) : h('span', { class: 'pill unknown' }, 'läuft')),
-      h('td', {}, t.parsed ? `${t.ok} gesichert${t.failed ? `, ${t.failed} fehlgeschlagen` : ''}${t.interrupted ? `, ${t.interrupted} unterbrochen` : ''}` : h('span', { class: 'sub' }, 'Protokoll wird gelesen …')),
-      h('td', {}, t.guests.length ? h('details', {}, h('summary', {}, `${t.guests.length} Gäste`), h('ul', { class: 'plain' }, t.guests.map((x) => h('li', {}, resultPill(x.result), ` ${x.vmid} ${x.name ?? ''}`, x.seconds ? h('span', { class: 'sub' }, ` · ${fmtMin(Math.max(1, Math.round(x.seconds / 60)))}`) : '', x.note ? h('div', { class: 'sub bad' }, x.note) : null)))) : '')))))) : h('p', { class: 'sub' }, 'Noch keine Backup-Läufe auf diesem Host gelesen. Die Aufgabenliste von Proxmox reicht einige Wochen zurück.');
+      h('td', {}, t.parsed ? [`${t.ok} gesichert${t.failed ? `, ${t.failed} fehlgeschlagen` : ''}${t.interrupted ? `, ${t.interrupted} unterbrochen` : ''}`, t.summary.cause === 'verbindung' ? h('div', { class: 'sub bad' }, 'Verbindung zum PBS') : null] : h('span', { class: 'sub' }, t.running ? 'läuft …' : 'Protokoll wird gelesen …')),
+      h('td', {}, t.guests.length ? h('details', {}, h('summary', {}, `${t.guests.length} Gäste`), h('ul', { class: 'plain' }, t.guests.map((x) => h('li', {}, resultPill(x.result), ` ${x.vmid} ${x.name ?? ''}`, x.seconds ? h('span', { class: 'sub' }, ` · ${fmtMin(Math.max(1, Math.round(x.seconds / 60)))}`) : '', x.note ? h('div', { class: 'sub bad' }, x.note) : null, x.detail ? h('details', {}, h('summary', {}, 'Protokollzeilen'), h('pre', { class: 'log' }, x.detail.replace(/ \| /g, '\n'))) : null)))) : '')))))) : h('p', { class: 'sub' }, 'Noch keine Backup-Läufe auf diesem Host gelesen. Die Aufgabenliste von Proxmox reicht einige Wochen zurück.');
 
-  return h('section', { class: 'panel' }, head, asBox,
+  return h('section', { class: 'panel' }, head, runBox, lrBox, asBox,
     h('h3', {}, `Gäste (${host.guests.length})`), host.guests.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['ID', 'Gast', 'Snapshots (vorhanden / vorgesehen)', 'Letztes Backup', 'Hinweise'].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Keine Gäste gelesen.'),
     h('h3', {}, 'Backup-Läufe'), runs);
 }
@@ -62,7 +72,7 @@ export function backupsView(b, data) {
   const outdated = b.hosts.filter((x) => x.reachable && !x.supported && x.gate.version != null);
   const kpis = h('div', { class: 'kpis' },
     kpi('Letzter Backup-Lauf', last ? ago(last.start, b.now) : '–', last ? `${last.hostLabel}: ${last.status === 'OK' ? 'in Ordnung' : last.status ?? 'läuft'}` : 'noch keiner gelesen', last && last.status !== 'OK' && last.status ? 'bad' : last ? 'ok' : ''),
-    kpi('Backup-Läufe (30 Tage)', k.runs30, 'auf allen Hosts'), kpi('Fehlgeschlagene Backups', k.failedBackups, k.failedBackups ? 'bei dem letzten Lauf des Gastes' : 'keine', k.failedBackups ? 'bad' : 'ok'),
+    kpi('Backup-Läufe (30 Tage)', k.runs30, 'auf allen Hosts'), kpi('Fehlgeschlagene Backups', k.failedBackups, k.failedBackups ? (k.failedCause === 'verbindung' ? 'meist: Verbindung zum PBS (siehe Lauf)' : 'beim letzten Lauf des Gastes') : 'keine', k.failedBackups ? 'bad' : 'ok'),
     kpi('Snapshots', k.snapshotsOff ? `${k.snapshotsOn} an, ${k.snapshotsOff} aus` : `${k.snapshotsOn} Hosts an`, 'Schalter von proxmox-autosnap', k.snapshotsOff ? 'watch' : 'ok'),
     kpi('Gäste mit Hinweis', k.problems, `von ${k.guests} Gästen`, k.problems ? 'watch' : 'ok'));
   return [

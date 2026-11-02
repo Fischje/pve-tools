@@ -39,6 +39,12 @@ export function openDb(dir) {
   const cols = db.prepare('PRAGMA table_info(testrun)').all().map((c) => c.name);
   const hostCols = db.prepare('PRAGMA table_info(host_state)').all().map((c) => c.name);
   if (!hostCols.includes('gate_version')) db.exec('ALTER TABLE host_state ADD COLUMN gate_version INTEGER');
+  const bgCols = db.prepare('PRAGMA table_info(backup_guest)').all().map((c) => c.name);
+  if (!bgCols.includes('cause')) {
+    db.exec('ALTER TABLE backup_guest ADD COLUMN cause TEXT');
+    db.exec('ALTER TABLE backup_guest ADD COLUMN detail TEXT');
+    db.exec('UPDATE backup_task SET parsed=0'); // ältere Auswertungen kannten den Fehlergrund nicht: Protokolle neu lesen
+  }
   if (!cols.includes('planned_minutes')) db.exec('ALTER TABLE testrun ADD COLUMN planned_minutes INTEGER');
   if (!cols.includes('completes_long')) db.exec('ALTER TABLE testrun ADD COLUMN completes_long INTEGER DEFAULT 0');
   const q = (sql) => db.prepare(sql);
@@ -143,16 +149,16 @@ export function openDb(dir) {
       db.exec('BEGIN');
       try {
         q('DELETE FROM backup_guest WHERE upid=?').run(upid);
-        const ins = q('INSERT OR REPLACE INTO backup_guest(upid,vmid,type,result,seconds,note) VALUES(?,?,?,?,?,?)');
-        for (const g of guests) ins.run(upid, g.vmid, g.type, g.result, g.seconds, g.note ?? '');
+        const ins = q('INSERT OR REPLACE INTO backup_guest(upid,vmid,type,result,seconds,note,cause,detail) VALUES(?,?,?,?,?,?,?,?)');
+        for (const g of guests) ins.run(upid, g.vmid, g.type, g.result, g.seconds, g.note ?? '', g.cause ?? null, g.detail ?? null);
         q('UPDATE backup_task SET parsed=1, job=? WHERE upid=?').run(job, upid);
         db.exec('COMMIT');
       } catch (e) { db.exec('ROLLBACK'); throw e; }
     },
     tasksOf: (hostId, limit = 20) => q('SELECT upid,start,end,status,user,job,parsed FROM backup_task WHERE host_id=? ORDER BY start DESC LIMIT ?').all(hostId, limit),
-    taskGuests: (upid) => q('SELECT vmid,type,result,seconds,note FROM backup_guest WHERE upid=? ORDER BY vmid').all(upid),
+    taskGuests: (upid) => q('SELECT vmid,type,result,seconds,note,cause,detail FROM backup_guest WHERE upid=? ORDER BY vmid').all(upid),
     /** Letztes Backup je Gast: neuester Lauf, in dem der Gast vorkam. */
-    lastBackups: (hostId) => q(`SELECT g.vmid, g.result, g.seconds, g.note, t.start, t.end, t.upid FROM backup_guest g JOIN backup_task t ON t.upid = g.upid
+    lastBackups: (hostId) => q(`SELECT g.vmid, g.result, g.seconds, g.note, g.cause, t.start, t.end, t.upid FROM backup_guest g JOIN backup_task t ON t.upid = g.upid
       WHERE t.host_id=? AND g.result IN ('ok','failed') AND t.start = (SELECT MAX(t2.start) FROM backup_task t2 JOIN backup_guest g2 ON g2.upid = t2.upid WHERE t2.host_id=t.host_id AND g2.vmid=g.vmid AND g2.result IN ('ok','failed'))`).all(hostId),
     lastOkBackups: (hostId) => q(`SELECT g.vmid, MAX(t.start) AS start FROM backup_guest g JOIN backup_task t ON t.upid = g.upid WHERE t.host_id=? AND g.result='ok' GROUP BY g.vmid`).all(hostId),
     setAutosnap: (hostId, obj, ts) => q('INSERT INTO autosnap_state(host_id,json,ts) VALUES(?,?,?) ON CONFLICT(host_id) DO UPDATE SET json=excluded.json,ts=excluded.ts').run(hostId, JSON.stringify(obj), ms(ts)),

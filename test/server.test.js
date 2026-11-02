@@ -303,3 +303,42 @@ test('Backups: Abfrage höchstens einmal pro Stunde, außer auf Knopfdruck', asy
   assert.ok(db.guestsOf('pve').length > 0);
   await engine.pollHost('pve', { force: true }); assert.equal(calls, 2);
 });
+
+test('Backups: Verbindungsausfall zum PBS wird als Ursache des Laufs angezeigt, laufender Lauf getrennt davon', async () => {
+  const { call, close, engine, db } = await boot();
+  await engine.pollHost('pve', { force: true });
+  const now = engine.now().getTime();
+  // Beendeter Lauf, bei dem alle Gäste an der Verbindung scheitern (PBS war zwischendurch aus)
+  const failed = 'wirklich fehlgeschlagener Lauf';
+  const up = 'UPID:pve:0000FFFF:00000001:6543210A:vzdump::root@pam:';
+  db.upsertTask('pve', { upid: up, start: now - 20 * 3600e3, end: now - 20 * 3600e3 + 3 * 60e3, status: 'job errors', user: 'root@pam' });
+  db.setTaskResult(up, 'errors', [112, 118, 121, 164].map((vmid) => ({ vmid, type: 'lxc', result: 'failed', seconds: null, note: 'error trying to connect: tcp connect error', cause: 'verbindung', detail: 'x' })));
+  // Neuerer, noch laufender Lauf (kein Ende)
+  db.upsertTask('pve', { upid: 'UPID:pve:0000EEEE:00000002:6543210B:vzdump::root@pam:', start: now - 30 * 60e3, end: null, status: null, user: 'root@pam' });
+  const pve = (await call('GET', '/api/backups')).json.hosts.find((h) => h.id === 'pve');
+  assert.ok(pve.runningJob, 'laufender Lauf wird erkannt');
+  assert.equal(pve.runningJob.parsed, false, 'unfertige Läufe werden nicht ausgewertet');
+  const lr = pve.lastRun;
+  assert.equal(lr.upid, up, failed);
+  assert.equal(lr.summary.cause, 'verbindung');
+  assert.equal(lr.summary.failed, 4);
+  const g = pve.guests.find((x) => x.vmid === 118);
+  assert.equal(g.backup.cause, 'verbindung');
+  assert.match(g.findings.find((f) => f.level === 'replace').text, /Verbindung zum PBS/);
+  assert.doesNotMatch(g.findings.find((f) => f.level === 'replace').text, /lxc-usernsexec/, 'kein abgeschnittener Befehl mehr als Begründung');
+  assert.equal((await call('GET', '/api/backups')).json.kpi.failedCause, 'verbindung');
+  close();
+});
+
+test('Update-Schutz: Backup-Tabellen einer älteren Version werden ergänzt und die Protokolle neu gelesen', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { mkdtempSync } = await import('node:fs'); const { tmpdir } = await import('node:os'); const path = await import('node:path');
+  const dir = mkdtempSync(path.join(tmpdir(), 'bk-mig-'));
+  const old = new DatabaseSync(path.join(dir, 'disktool.sqlite'));
+  old.exec("CREATE TABLE backup_task (upid TEXT PRIMARY KEY, host_id TEXT NOT NULL, start INTEGER, end INTEGER, status TEXT, user TEXT, job TEXT, parsed INTEGER DEFAULT 0); CREATE TABLE backup_guest (upid TEXT NOT NULL, vmid INTEGER NOT NULL, type TEXT, result TEXT, seconds INTEGER, note TEXT, PRIMARY KEY (upid, vmid)); INSERT INTO backup_task VALUES('U','pve',1,2,'OK','root@pam','ok',1); INSERT INTO backup_guest VALUES('U',101,'qemu','failed',NULL,'abgeschnitten');");
+  old.close();
+  const db2 = openDb(dir);
+  assert.equal(db2.unparsedTasks('pve').length, 1, 'der Lauf wird neu gelesen, damit der Fehlergrund erscheint');
+  assert.equal(db2.taskGuests('U')[0].cause, null);
+  db2.close();
+});
