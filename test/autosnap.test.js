@@ -107,7 +107,7 @@ test('Einrichten: Werte des alten Wrappers werden in /etc/autosnap.conf übernom
   const setup = readFileSync('host-setup/setup-host.sh', 'utf8');
   const from = setup.indexOf('# Mit dem Recht "snapshots"'), to = setup.indexOf('tmp="$(mktemp)"');
   assert.ok(from > 0 && to > from);
-  const block = sub(setup.slice(from, to));
+  const block = sub(setup.slice(from, to)).replaceAll(' -o root -g root', ''); // der Test läuft ohne root (CI)
   const oldPve = readFileSync('test/fixtures/autosnap-run-pve.sh', 'utf8');
   for (const [name, old, expect] of [
     ['pve', oldPve, 'KEEP_HOURLY=8\nKEEP_WEEKLY=1\nKEEP_MONTHLY=1\nPAUSE_DAY=1\nMONTHLY_DAY=1\nTAG=autosnap\nONLY_RUNNING=1\n'],

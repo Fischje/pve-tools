@@ -181,7 +181,7 @@ const calls = (world, id) => world.state.get(id).snapCalls ?? [];
 test('Snapshots durch das Tool: standardmäßig bleibt es beim Cron, nach der Übernahme löst das Tool aus (nur einmal je Slot)', async () => {
   const { engine, world, advance } = setup();
   await engine.pollHost('pve');
-  assert.deepEqual(engine.hostRights('pve'), ['snapshots']);
+  assert.deepEqual(engine.hostRights('pve'), ['snapshots', 'backup-starten']);
   await engine.tickHost('pve');
   assert.deepEqual(calls(world, 'pve'), [], 'ohne Übernahme löst das Tool nichts aus');
   await engine.setSnapMode('pve', 'tool');

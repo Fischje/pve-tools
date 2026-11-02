@@ -76,6 +76,21 @@ export class HostClient {
   }
   async snapCron(action) { const r = await this.t.run(`snap-cron ${action}`, 20000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Cron nicht geändert'); return r.stdout.trim(); }
 
+  // ---- Backup-Steuerung (Prüfskript ab Version 8)
+  /** Ist der Speicher (z. B. der PBS) auf diesem Host aktiv? */
+  async storageActive(name) {
+    const r = await this.t.run(`storage-status ${name}`, 30000);
+    const line = r.stdout.split('\n').map((l) => l.trim().split(/\s+/)).find((c) => c[0] === name);
+    return { known: !!line, active: line?.[2] === 'active', raw: r.stdout.trim().slice(0, 300) };
+  }
+  /** Startet vzdump als eigenen Dienst auf dem Host. sel: {select:'all'|'exclude'|'only', ids:number[]} */
+  async backupStart(storage, sel) {
+    const arg = sel.select === 'all' ? 'all' : `${sel.select} ${sel.ids.join(',')}`;
+    const r = await this.t.run(`backup-start ${storage} ${arg}`, 60000);
+    if (r.code !== 0) throw new Error(r.stderr.trim() || r.stdout.trim().slice(0, 300) || 'Backup konnte nicht gestartet werden');
+  }
+  async poweroff() { const r = await this.t.run('poweroff', 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Herunterfahren abgelehnt'); }
+
   /** Kernel-Meldungen zu Verbindungsfehlern der letzten 48 h (braucht Prüfskript ab Version 5). */
   async kernelLog() { const r = await this.t.run('kernel', 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Kernel-Meldungen nicht lesbar'); return parseKernelLog(r.stdout); }
 

@@ -38,7 +38,7 @@ async function defaultResolve(address) {
 export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 /** Das Skript, das auf dem Host über `bash -s` läuft. gate.sh und setup-host.sh werden darin als Dateien abgelegt. */
-export const RIGHTS = ['snapshots'];
+export const RIGHTS = ['snapshots', 'backup-starten', 'herunterfahren'];
 /** rights: null = Rechtedatei auf dem Host unverändert lassen, sonst Liste der freizugebenden Gruppen (leer = alle entziehen). */
 export function buildRemoteScript({ gate, setup, wrapper = null, publicKey, action, bindIp, installPackages, rights = null }) {
   if (rights != null && !(Array.isArray(rights) && rights.every((r) => RIGHTS.includes(r)))) throw new Error('Unbekannte Rechtegruppe');

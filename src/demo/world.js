@@ -83,6 +83,26 @@ export class DemoWorld {
     this.clock = clock; this.opts = opts; this.hosts = def.hosts;
     this.state = new Map(def.hosts.map((h) => [h.id, { up: true, bootAt: clock().getTime() - h.uptime * 1000, disks: new Map(def.disks[h.id].map((j) => [j.device.name, { json: j, running: null }])), scrub: false }]));
   }
+  /** Freigegebene Rechtegruppen je Host (Demo). */
+  rightsOf(id) { return this.rights?.get(id) ?? { pve: ['snapshots', 'backup-starten'], router: ['backup-starten'], pbs: ['herunterfahren'] }[id] ?? []; }
+  /** Von der Demo „gestarteter“ vzdump-Task, solange er läuft oder gerade fertig wurde. */
+  vzdumpTask(id) {
+    const v = this.state.get(id).vz; if (!v) return null;
+    const done = this.clock().getTime() >= v.start + v.minutes * 60000;
+    return { upid: v.upid, node: id, pid: 1, pstart: 1, starttime: Math.floor(v.start / 1000), type: 'vzdump', id: '', user: 'root@pam', ...(done ? { endtime: Math.floor((v.start + v.minutes * 60000) / 1000), status: v.fail ? 'job errors' : 'OK' } : {}) };
+  }
+  vzdumpLog(id, upid) {
+    const v = this.state.get(id).vz; if (!v || v.upid !== upid) return null;
+    const done = this.clock().getTime() >= v.start + v.minutes * 60000;
+    const lines = [`INFO: starting new backup job: vzdump --storage pbs`];
+    for (const g of v.ids) {
+      lines.push(`INFO: Starting Backup of VM ${g} (lxc)`);
+      if (v.fail === g) lines.push(`ERROR: Backup of VM ${g} failed - proxmox-backup-client failed: Error: error trying to connect: Connection refused`);
+      else if (done || g !== v.ids.at(-1)) lines.push(`INFO: Finished Backup of VM ${g} (00:01:00)`);
+    }
+    if (done) lines.push(v.fail ? 'INFO: Backup job finished with errors' : 'INFO: Backup job finished successfully', v.fail ? 'TASK ERROR: job errors' : 'TASK OK');
+    return lines.map((t, i) => ({ n: i + 1, t }));
+  }
   setUp(hostId, up) { const s = this.state.get(hostId); s.up = up; if (up) s.bootAt = this.clock().getTime(); }
   setScrub(hostId, v) { this.state.get(hostId).scrub = v; }
   disk(hostId, dev) { return this.state.get(hostId).disks.get(dev); }
@@ -126,10 +146,23 @@ export class DemoTransport {
     switch (a[0]) {
       case 'version': return ok(String(this.id === 'pbs' ? 3 : EXPECTED_GATE_VERSION)); // pbs ist in der Demo absichtlich veraltet
       case 'kernel': return ok('');
-      case 'rechte': return ok(this.id === 'pve' || this.id === 'router' ? (w.rights?.get(this.id) ?? (this.id === 'pve' ? ['snapshots'] : [])).join('\n') : '');
+      case 'rechte': return ok(w.rightsOf(this.id).join('\n'));
+      case 'storage-status': { if (this.id === 'pbs') return ok(''); return ok(`Name Type Status Total Used Available %\n${a[1]} pbs ${st.storageDown ? 'inactive' : 'active'} 17921372160 9012312320 8909059840 50.29%\n`); }
+      case 'backup-start': {
+        if (!w.rightsOf(this.id).includes('backup-starten')) return { code: 64, stdout: '', stderr: "gate: Recht 'backup-starten' ist für diesen Host nicht freigegeben" };
+        if (st.vz && w.clock().getTime() < st.vz.start + st.vz.minutes * 60000) return { code: 1, stdout: '', stderr: 'Failed to start transient service unit: Unit pvetools-vzdump.service was already loaded or has a fragment file.' };
+        const all = demoGuests(this.id).map((g) => g.vmid), sel = a[2] === 'all' ? all : a[2] === 'only' ? a[3].split(',').map(Number) : all.filter((x) => !a[3].split(',').map(Number).includes(x));
+        const now = w.clock().getTime();
+        (st.snapCalls ??= []).push(command);
+        st.vz = { upid: `UPID:${this.id}:0001${String(now % 100000).padStart(4, '0')}:00AB:${Math.floor(now / 1000).toString(16).toUpperCase()}:vzdump::root@pam:`, start: now, minutes: st.vzMinutes ?? 30, ids: sel, fail: st.vzFail ?? null };
+        return ok('');
+      }
+      case 'poweroff': {
+        if (!w.rightsOf(this.id).includes('herunterfahren')) return { code: 64, stdout: '', stderr: "gate: Recht 'herunterfahren' ist für diesen Host nicht freigegeben" };
+        (st.snapCalls ??= []).push(command); w.setUp(this.id, false); return ok('Herunterfahren in 20 Sekunden');
+      }
       case 'snap-run': case 'snap-switch': case 'snap-cron': case 'snap-conf': case 'snap-dryrun': {
-        const r = w.rights?.get(this.id) ?? (this.id === 'pve' ? ['snapshots'] : []);
-        if (!r.includes('snapshots')) return { code: 64, stdout: '', stderr: "gate: Recht 'snapshots' ist für diesen Host nicht freigegeben" };
+        if (!w.rightsOf(this.id).includes('snapshots')) return { code: 64, stdout: '', stderr: "gate: Recht 'snapshots' ist für diesen Host nicht freigegeben" };
         (st.snapCalls ??= []).push(command);
         if (a[0] === 'snap-conf') { st.conf = { ...(st.conf ?? {}), KEEP_HOURLY: a[1], KEEP_WEEKLY: a[2], KEEP_MONTHLY: a[3], PAUSE_DAY: a[4], MONTHLY_DAY: a[5], TAG: st.conf?.TAG ?? 'autosnap', ONLY_RUNNING: st.conf?.ONLY_RUNNING ?? 1 }; return ok('ok'); }
         if (a[0] === 'snap-dryrun') return ok(`Wrapper: autosnap-run v2, Bezeichnung ${a[1]}, Aufbewahrung ${(st.conf ?? {})['KEEP_' + a[1].toUpperCase()] ?? 8}, Auswahl: laufende Container mit Tag autosnap: 109 112 113 118\nContainer 109: würde Snapshot anlegen (Demo)`);
@@ -139,8 +172,8 @@ export class DemoTransport {
       }
       case 'guests': { if (this.id === 'pbs') return ok(''); const g = demoGuests(this.id); return ok(`lxc\t${JSON.stringify(g)}\nqemu\t[]\n`); }
       case 'snapshots': { if (this.id === 'pbs') return ok(''); return ok(demoSnapshots(this.id, w.clock()).map((r) => `${r.type}\t${r.vmid}\t${JSON.stringify(r.list)}`).join('\n') + '\n'); }
-      case 'tasks': { if (this.id === 'pbs') return ok(''); return ok(JSON.stringify(demoBackups(this.id, w.clock()).tasks)); }
-      case 'tasklog': { const log = demoBackups(this.id, w.clock()).logs[a[1]]; return log ? ok(JSON.stringify(log)) : { code: 64, stdout: '', stderr: 'gate: unbekannte Aufgabe' }; }
+      case 'tasks': { if (this.id === 'pbs') return ok(''); return ok(JSON.stringify([...(w.vzdumpTask(this.id) ? [w.vzdumpTask(this.id)] : []), ...demoBackups(this.id, w.clock()).tasks])); }
+      case 'tasklog': { const log = w.vzdumpLog(this.id, a[1]) ?? demoBackups(this.id, w.clock()).logs[a[1]]; return log ? ok(JSON.stringify(log)) : { code: 64, stdout: '', stderr: 'gate: unbekannte Aufgabe' }; }
       case 'autosnap': { if (this.id === 'pbs') return ok(''); return ok(demoAutosnapText(this.id, w.clock(), { cronOff: !!st.cronOff, off: !!st.snapOff, conf: this.id === 'pve' ? (st.conf ??= { KEEP_HOURLY: 8, KEEP_WEEKLY: 1, KEEP_MONTHLY: 1, PAUSE_DAY: 1, MONTHLY_DAY: 1, TAG: 'autosnap', ONLY_RUNNING: 1 }) : null })); }
       case 'uptime': return ok(String((w.clock().getTime() - st.bootAt) / 1000));
       case 'list': return ok({ blockdevices: [...st.disks.values()].map((d) => ({ name: d.json.device.name.slice(5), type: 'disk', model: d.json.model_name, serial: d.json.serial_number, size: d.json.user_capacity.bytes, rota: d.json.rotation_rate > 0, tran: d.json.device.protocol === 'NVMe' ? 'nvme' : 'sata' })) });

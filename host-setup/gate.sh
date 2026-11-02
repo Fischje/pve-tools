@@ -29,11 +29,17 @@
 #   snap-conf <stündlich> <wöchentlich> <monatlich> <pausentag> <monatstag>
 #                                            schreibt /etc/autosnap.conf (Aufbewahrung 1–99/1–52/1–36, Pausentag 0=keiner oder 1–7, Monatstag 1–28)
 #   snap-dryrun hourly|weekly|monthly        Probelauf ohne Wirkung (zeigt, welche Container betroffen wären)
+# Backups (PVE-Hosts, Recht "backup-starten") und Herunterfahren (PBS, Recht "herunterfahren"):
+#   storage-status <name>                    Zustand eines Speichers (lesend, ohne Recht), z. B. ob der PBS erreichbar ist
+#   backup-start <speicher> all              vzdump --all 1 als eigener systemd-Dienst (läuft weiter, auch wenn die SSH-Verbindung abbricht)
+#   backup-start <speicher> exclude <ids>    dito, ohne die Gäste <ids> (Ziffern, Komma getrennt)
+#   backup-start <speicher> only <ids>       dito, nur diese Gäste
+#   poweroff                                 fährt den Host in 20 Sekunden herunter
 #   snap-cron on|off|status                  benennt /etc/cron.d/proxmox-autosnap um (aus) bzw. zurück (an), damit nie zwei Auslöser laufen
 set -euo pipefail
 
 # Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
-GATE_VERSION=7
+GATE_VERSION=8
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
@@ -164,6 +170,30 @@ case "${a[0]}" in
     grep -q '^# autosnap-run v2' /usr/local/sbin/autosnap-run || fail "autosnap-run ist noch nicht die verwaltete Version (Skript aktualisieren mit Haken Snapshots auslösen erlauben)"
     export DRYRUN=1 FORCE=1
     exec flock -n /run/diskmon-snap.lock /usr/local/sbin/autosnap-run "${a[1]}" ;;
+  storage-status)
+    [[ ${#a[@]} -eq 2 && "${a[1]}" =~ ^[A-Za-z0-9_-]{1,32}$ ]] || fail "Argumente: storage-status <name>"
+    command -v pvesm >/dev/null 2>&1 || exit 0
+    pvesm status --storage "${a[1]}" 2>&1 || true ;;
+  backup-start)
+    need backup-starten
+    [[ ${#a[@]} -ge 3 && ${#a[@]} -le 4 ]] || fail "Argumente: backup-start <speicher> all|exclude <ids>|only <ids>"
+    [[ "${a[1]}" =~ ^[A-Za-z0-9_-]{1,32}$ ]] || fail "ungültiger Speichername"
+    command -v vzdump >/dev/null 2>&1 || fail "vzdump fehlt (kein Proxmox-Host?)"
+    ids_ok() { [[ "$1" =~ ^[0-9]{3,9}(,[0-9]{3,9}){0,63}$ ]] || fail "ungültige Liste: nur Gast-IDs, mit Komma getrennt"; }
+    base=(--storage "${a[1]}" --mode snapshot --compress zstd)
+    case "${a[2]}" in
+      all)     [[ ${#a[@]} -eq 3 ]] || fail "all hat kein weiteres Argument"; cmd=(vzdump --all 1 "${base[@]}") ;;
+      exclude) [[ ${#a[@]} -eq 4 ]] || fail "exclude braucht eine Liste"; ids_ok "${a[3]}"; cmd=(vzdump --all 1 --exclude "${a[3]}" "${base[@]}") ;;
+      only)    [[ ${#a[@]} -eq 4 ]] || fail "only braucht eine Liste"; ids_ok "${a[3]}"; IFS=, read -r -a vm <<< "${a[3]}"; cmd=(vzdump "${vm[@]}" "${base[@]}") ;;
+      *) fail "unbekannte Auswahl" ;;
+    esac
+    # Fester Dienstname: ein zweiter Start schlägt fehl, solange der erste noch läuft.
+    exec systemd-run --quiet --collect --unit=pvetools-vzdump --description="pve-tools: vzdump" "${cmd[@]}" ;;
+  poweroff)
+    need herunterfahren
+    [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
+    systemd-run --quiet --collect --unit=pvetools-poweroff --on-active=20s systemctl poweroff
+    echo "Herunterfahren in 20 Sekunden" ;;
   snap-cron)
     need snapshots
     [[ ${#a[@]} -eq 2 && "${a[1]}" =~ ^(on|off|status)$ ]] || fail "Argumente: snap-cron on|off|status"
