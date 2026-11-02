@@ -258,3 +258,48 @@ test('Update-Schutz: Pools im Format einer älteren Version (ohne vdev-Baum) bri
   assert.ok(db.getHostState('pve').pools.find((p) => p.name === 'tank').vdevs.length > 0);
   close();
 });
+
+test('Backups und Snapshots: Gäste, Snapshot-Stand, Backup-Läufe und Zustand der Snapshot-Skripte aus deinen Skripten', async () => {
+  const { call, close, engine } = await boot();
+  await engine.pollHost('router', { force: true }); await engine.pollHost('pve', { force: true }); await engine.pollHost('pbs', { force: true });
+  const b = (await call('GET', '/api/backups')).json;
+  const pve = b.hosts.find((h) => h.id === 'pve'), router = b.hosts.find((h) => h.id === 'router'), pbs = b.hosts.find((h) => h.id === 'pbs');
+  // Prüfskript ab Version 4 ist Voraussetzung: der veraltete PBS liefert nichts
+  assert.equal(pbs.supported, false);
+  assert.equal(pbs.guests.length, 0);
+  assert.equal(pve.supported, true);
+  assert.equal(pve.guests.length, 16);
+  // proxmox-autosnap: Aufbewahrung, Pausentag und Cron kommen aus dem Wrapper, nicht aus Annahmen
+  assert.deepEqual(pve.autosnap.keep, { hourly: 8, weekly: 1, monthly: 1 });
+  assert.equal(pve.autosnap.pauseDay, 1);
+  assert.equal(pve.autosnap.enabled, true);
+  assert.deepEqual(pve.autosnap.cron.map((c) => c.text), ['stündlich um :05', 'wöchentlich So 00:25', 'monatlich am 1. und 2. um 00:45']);
+  // Snapshots
+  const g112 = pve.guests.find((g) => g.vmid === 112);
+  assert.equal(g112.snapshots.hourly.count, 8);
+  assert.equal(g112.snapshots.weekly.count, 1);
+  assert.equal(g112.tagged, true);
+  assert.equal(pve.guests.find((g) => g.vmid === 141).tagged, false, 'ohne Tag keine Snapshots erwartet');
+  // wöchentlicher Snapshot fehlt bei 119/161 auf dem pve: Hinweis, kein Alarm
+  const g119 = pve.guests.find((g) => g.vmid === 119);
+  assert.ok(g119.findings.some((f) => f.level === 'info' && /wöchentlich/.test(f.text)));
+  assert.equal(g119.level, 'info');
+  // Backups: Läufe mit Protokoll, ein Fehlschlag auf dem pve
+  assert.ok(pve.tasks.length >= 5);
+  const bad = pve.tasks.find((x) => x.failed > 0);
+  assert.ok(bad, 'Fehlschlag vom 12.10. ist im Verlauf');
+  assert.equal(bad.guests.find((x) => x.result === 'failed').vmid, 164);
+  assert.equal(router.guests.find((g) => g.vmid === 109).backup.result, 'ok', 'Router sichert alle Gäste, der pve schließt 109 aus');
+  assert.equal(pve.guests.find((g) => g.vmid === 109).backup, null, 'ausgeschlossen: kein Backup bekannt, kein Alarm');
+  assert.ok(b.lastRun && b.kpi.guests === 24);
+  close();
+});
+
+test('Backups: Abfrage höchstens einmal pro Stunde, außer auf Knopfdruck', async () => {
+  const { engine, db } = await boot();
+  let calls = 0; const orig = engine.client('pve').guests.bind(engine.client('pve')); engine.client('pve').guests = async () => { calls++; return orig(); };
+  await engine.pollHost('pve', { force: true }); assert.equal(calls, 1);
+  await engine.pollHost('pve'); assert.equal(calls, 1, 'zweite Abfrage direkt danach liest die Backup-Daten nicht neu');
+  assert.ok(db.guestsOf('pve').length > 0);
+  await engine.pollHost('pve', { force: true }); assert.equal(calls, 2);
+});

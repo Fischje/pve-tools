@@ -1,69 +1,74 @@
-# Backup- und Snapshot-Steuerung (Plan)
+# Backup- und Snapshot-Steuerung
 
-Stand: Entwurf, noch nicht umgesetzt. Ziel: Das Tool (läuft im LXC auf dem immer eingeschalteten `router`) übernimmt Backups und Snapshots, die heute
-Skripte auf dem PBS und den PVE-Hosts erledigen. Parameter lassen sich in der Oberfläche ändern, alles wird überwacht.
+Stand: Stufe 1 (Beobachten) ist umgesetzt, Stufen 2 und 3 sind Plan. Ziel: Das Tool (läuft im LXC auf dem immer eingeschalteten `router`) überwacht Backups und
+Snapshots, die heute Skripte erledigen, und übernimmt später die Steuerung. Parameter lassen sich dann in der Oberfläche ändern.
 
-## Was ich aus deinen Chats entnommen habe (und was nicht)
+## So ist es heute eingerichtet (nach deinen Skripten)
 
-Quelle: `notes/chats/chatgpt/2026-01-31_backup-skript-anfrage_…` im Palast. **Die tatsächlich eingesetzten Skripte habe ich nicht gesehen.**
+Hosts: `192.168.1.250` = **router**, `192.168.1.2` = **pve**. Backup-Ziel: Storage `pbs` auf den Hosts, Datastore `backup` (ZFS) auf dem PBS.
 
-- **Orchestrator auf dem PBS** (`/usr/local/sbin/pbs-run-backups.sh`): Cron startet ihn etwa 20 Minuten nach dem Hochfahren. Er geht die PVE-Hosts nacheinander durch
-  (`192.168.1.250` und `192.168.1.2`), startet auf jedem per SSH `vzdump` mit Ziel-Storage `pbs`, Modus `snapshot`, Kompression `zstd`, wartet auf das Ende
-  und fährt den PBS danach mit `systemctl poweroff` herunter. Pro Host gibt es „alle“, „alle außer …“ oder eine feste ID-Liste.
-- **Bekannte Stolpersteine** aus dem Chat: Das Warten über die Task-API von PVE 9 war unzuverlässig, deshalb wurde später auf ein Backup im Vordergrund per SSH
-  umgestellt. Ein laufendes Backup wurde schon einmal von Hand abgebrochen, ohne dass der PBS ausgehen sollte. „Herunterfahren nur bei vollständigem Erfolg“
-  wurde vorgeschlagen, ob es umgesetzt ist, weiß ich nicht.
-- **Snapshots:** Gewünscht sind stündliche Snapshots der Webserver-LXC, behalten werden die letzten 8 Stunden, die letzten 3 Tage und „alle drei Wochen einer“.
-  Offen blieb dort, wie lange die Drei-Wochen-Snapshots bleiben sollen. Der Chat weist auch darauf hin, dass lokale Snapshots nicht vor dem Ausfall des Storage schützen.
-- **Sicherheit:** Im Chat steht ein root-Passwort im Klartext (der Orchestrator meldet sich per Passwort an den Hosts an). Der Chat liegt im Palast und damit auf
-  GitHub. Wenn es das echte Passwort ist, bitte ändern. Die neue Lösung braucht kein Passwort, sondern wie bisher einen eingeschränkten Schlüssel.
+**Backup (Orchestrator auf dem PBS, `pbs-run-backups.sh`):**
+- Läuft nach dem Hochfahren des PBS (montags). Der Reihe nach: erst `router` (alle Gäste), dann `pve` (alle außer 109, 112, 113, 114, 116, 119, 117, 159, 161, 171).
+- Je Host per SSH `vzdump --all 1 [--exclude …] --storage pbs --mode snapshot --compress zstd`, danach wartet er, bis keine vzdump-Aufgabe mehr läuft.
+- Danach `systemctl poweroff` auf dem PBS. Heute geschieht das **ohne Prüfung, ob alle Backups erfolgreich waren**.
+- Er meldet sich per **SSH-Passwort** (sshpass, root) an den Hosts an. Dieses Passwort steht im Klartext im Skript und in einem Chat im Palast (also auf GitHub).
+  Bitte ändern, sobald die Steuerung umgezogen ist. Das Tool braucht kein Passwort, sondern einen eingeschränkten Schlüssel.
 
-## Zielbild
+**Snapshots (auf jedem Host, `proxmox-autosnap` + Wrapper `autosnap-run`):**
+- Aufbewahrung: **stündlich 8, wöchentlich 1, monatlich 1** (`KEEP` im Wrapper). Montag ist Pausentag (`PAUSE_DAY=1`), weil dann das Backup läuft.
+- Cron (`/etc/cron.d/proxmox-autosnap`): stündlich um :05, wöchentlich sonntags 00:25, monatlich am 1. um 00:45 (ist der 1. ein Montag, am 2.).
+- Ausgewählt werden LXC mit dem Tag `autosnap`. Auf dem `pve` nur laufende Container (der Wrapper ermittelt sie selbst), auf dem `router` über `--tags autosnap`.
+- Ein/Aus-Schalter: Datei `/etc/autosnap.disabled` (`autosnap-switch on|off|status`). Meldungen: `journalctl -t autosnap`.
+- Die Snapshots entstehen als Proxmox-Snapshots der LXC (auf ZFS also ZFS-Snapshots auf dem jeweiligen Host).
 
-```
-router-LXC (Tool)  ──SSH, eingeschränkter Schlüssel──►  PVE-Hosts:  vzdump starten, Tasks lesen, Gäste auflisten, Snapshots anlegen/löschen
-                                                    └─►  PBS:       Status lesen, herunterfahren
-```
+> Korrektur: In der ersten Fassung dieses Plans stand „3 Tage und alle drei Wochen“. Das stammte aus dem Wunsch im Chat vom 28.09. Maßgeblich ist, was in den
+> Skripten steht: 8 stündlich, 1 wöchentlich, 1 monatlich.
 
-Die Steuerung läuft im Tool, nicht mehr auf dem PBS. Das Tool erkennt, dass der PBS hochgefahren ist (wie heute bei den Plattentests), wartet die eingestellte
-Zeit, startet die Backups host für host, prüft jedes Ergebnis und fährt den PBS nur dann herunter, wenn alles erfolgreich war.
+## Stufe 1: Beobachten (umgesetzt)
+
+Reiter „Backups & Snapshots“. Das Tool liest nur, über neue, rein lesende Befehle im Prüfskript auf den Hosts (**Prüfskript Version 4**, auf den Hosts einmalig
+über „Skript aktualisieren“ einspielen):
+- Gäste je Host mit Status und Tags.
+- Snapshots je Gast, erkannt an den Namen von proxmox-autosnap (`autohourly…`, `autoweekly…`, `automonthly…`), mit Anzahl und Alter im Vergleich zur Aufbewahrung.
+- Zustand von proxmox-autosnap: Schalter, `KEEP`-Werte und Pausentag **aus deinem Wrapper gelesen**, Cron-Zeilen, letzte Meldungen.
+- Backup-Läufe aus der Aufgabenliste von Proxmox samt Protokoll: je Lauf Dauer und Ergebnis, je Gast gesichert / fehlgeschlagen / unterbrochen mit Fehlertext.
+- Hinweise: fehlgeschlagenes Backup, länger als 9 Tage kein Backup bei einem früher gesicherten Gast, ausgebliebene Stunden-Snapshots, ausgeschaltete Snapshots.
+
+Die Abfrage läuft höchstens einmal pro Stunde (auf Knopfdruck sofort). Ob ein Gast ein Backup bekommen soll, weiß das Tool in dieser Stufe nicht, denn die Ausschlussliste
+steht im Orchestrator. Deshalb gibt es nur dann einen Hinweis, wenn ein Gast früher gesichert wurde.
+
+**Was die Ansicht vermutlich zeigen wird:** Die wöchentlichen und monatlichen Snapshots laufen um 00:25 und 00:45. Läuft der `pve` dann nicht, fallen sie aus. Das ist eine
+Vermutung aus den Cron-Zeiten, die Ansicht klärt sie. Fehlt dort der wöchentliche oder monatliche Snapshot, steht ein Hinweis bei dem Gast.
+
+## Stufe 2: Snapshots verwalten (Plan)
+
+Die Snapshots sollen **weiter auf den Hosts per Cron laufen**, damit sie auch dann entstehen, wenn der LXC aus ist. Das Tool verwaltet nur die Einstellungen und überwacht:
+- `autosnap-run` liest `KEEP`, Pausentag und Tag aus einer kleinen Datei `/etc/autosnap.conf` statt aus dem Skript. Das Tool schreibt diese Datei über einen geprüften Befehl
+  (nur Zahlen in festen Grenzen, nur der Tag-Name aus einer Positivliste).
+- Ein/Aus-Schalter in der Oberfläche (setzt oder löscht `/etc/autosnap.disabled`).
+- Trockenlauf-Anzeige: was `autosnap-run` jetzt tun würde.
+
+## Stufe 3: Backup-Lauf durch das Tool (Plan)
+
+Das Tool ersetzt den Orchestrator auf dem PBS und läuft auf dem immer eingeschalteten `router`:
+- Es erkennt, dass der PBS hochgefahren ist (wie bei den Plattentests), wartet die eingestellte Zeit und startet die Backups host für host.
+- Jeder Lauf wird über Aufgabenliste und Protokoll geprüft (wie in Stufe 1).
+- **Der PBS wird nur heruntergefahren, wenn alle Backups erfolgreich waren** (einstellbar an/aus).
+- Einstellungen in der Oberfläche: Auswahl der Gäste je Host (alle / alle außer / nur diese), Wartezeit nach dem Hochfahren, Herunterfahren an/aus.
+- Neue, einzeln freigebbare Rechte im Prüfskript: `vzdump` starten, auf dem PBS `poweroff`. Nur feste Befehle mit geprüften Argumenten, keine freie Shell.
+- Vor dem Umschalten wird der Cron-Eintrag des alten Orchestrators auf dem PBS ausgeschaltet, damit nie zwei Steuerungen gleichzeitig laufen.
+- Zuerst ein Trockenlauf („würde sichern: …“), dann parallel beobachtend, dann scharf.
 
 ## Sicherheitsmodell
 
-Das Prüfskript auf den Hosts (`/etc/diskmon/gate.sh`) erlaubt heute nur Lesebefehle und Selbsttests. Backup und Snapshots brauchen mehr Rechte. Deshalb:
-
-- **Fähigkeitsgruppen je Host**, einzeln einschaltbar und vom Host aus nachvollziehbar (Datei in `/etc/diskmon`, nur root): `platten` (wie bisher), `backup` (vzdump, Tasks, Gäste lesen),
-  `snapshots` (anlegen, löschen), `herunterfahren` (nur PBS). Ein Host bekommt nur, was du dort freigibst. Die Freigabe geschieht über „Neu einrichten“ mit dem root-Passwort.
-- **Nur feste Befehle mit geprüften Argumenten:** IDs nur Ziffern, Storage-Name aus einer Positivliste, Modus und Kompression fest. Keine freie Shell.
-- **Löschen nur für eigene Snapshots:** Das Prüfskript löscht ausschließlich Snapshots mit dem Namensmuster `auto-JJJJMMTT-HHMM`. Von Hand angelegte Snapshots sind nie betroffen.
-- **Trockenlauf:** Jede neue Funktion hat zuerst einen Trockenlauf („würde löschen / würde sichern“), bevor sie wirklich handelt.
-- **Nie zwei Steuerungen gleichzeitig:** Vor dem Umschalten wird der Cron-Job auf dem PBS ausgeschaltet. Das Tool warnt, solange es auf dem PBS noch den alten Orchestrator findet.
-
-## Stufen
-
-1. **Beobachten:** Gästeliste je Host (VMs und LXC mit Namen), letzte Backups je Gast mit Alter und Ergebnis, Snapshots je LXC, Verlauf der Läufe. Mail, wenn ein Gast länger kein Backup hat.
-2. **Snapshots:** stündlich anlegen und nach der Aufbewahrungsregel aufräumen, zuerst im Trockenlauf.
-3. **Backup-Lauf:** Das Tool startet und überwacht die `vzdump`-Läufe, danach optional das Herunterfahren des PBS. Zuerst im Trockenlauf, dann parallel beobachtend, dann scharf.
-4. **Feinschliff:** Statistik (Dauer, Größe, Erfolgsquote), Mails bei Fehlschlag, Regel „kein Plattentest, solange auf dem Host ein Backup läuft“.
-
-## Einstellungen in der Oberfläche
-
-- Auswahl der VMs und LXC je Host: alle, alle außer …, oder nur bestimmte IDs.
-- Startzeit und Wartezeit nach dem Hochfahren des PBS.
-- Aufbewahrung der Snapshots (stündlich, täglich, Langzeit).
-- PBS nach dem Backup herunterfahren: an oder aus, nur bei vollständigem Erfolg.
-
-## Was ich zum Umsetzen noch brauche
-
-- Die **aktuellen Skripte** als Dateien: den Orchestrator vom PBS (`/usr/local/sbin/pbs-run-backups.sh`), die Snapshot-Skripte samt Cron-Einträgen von den Hosts und die Cron-Zeile auf dem PBS.
-- Hosts und IDs: Welcher Host ist `192.168.1.250`, welcher `192.168.1.2`? Welche LXC bekommen Snapshots?
-- Wie lange sollen die Drei-Wochen-Snapshots bleiben (für immer, 6 oder 12 Monate)?
-- Name des Storage auf den Hosts (`pbs`?) und die Wartezeit nach dem Boot.
+- Fähigkeitsgruppen je Host, einzeln einschaltbar über „Neu einrichten“ (mit dem root-Passwort): `platten` und `beobachten` (lesend, jetzt schon), später `snapshots-verwalten`, `backup-starten`, `herunterfahren`.
+- Nur feste Befehle, IDs nur Ziffern, Namen aus Positivlisten, keine freie Shell.
+- Das Tool löscht nie selbst Snapshots. Das erledigt weiter proxmox-autosnap mit eigenen Regeln.
 
 ## Umbenennung
 
-Die Oberfläche heißt jetzt „Fischje's PVE-Tools“. Das GitHub-Repo kann ich nicht selbst umbenennen. Vorschlag für den neuen Namen: `pve-tools` (wie der LXC). Ablauf:
+Die Oberfläche heißt „Fischje's PVE-Tools“. Das GitHub-Repo kann ich nicht selbst umbenennen. Vorschlag: `pve-tools` (wie der LXC).
 1. GitHub, Repo, Settings, „Repository name“ ändern. Alte Adressen leitet GitHub weiter.
 2. Im LXC: `cd /opt/pve-disk-tool && git remote set-url origin https://github.com/Fischje/pve-tools.git`.
-3. Die Pfade `/opt/pve-disk-tool` und der Dienstname `pve-disk-tool` können bleiben, damit der automatische Abgleich unverändert läuft.
+3. Pfade (`/opt/pve-disk-tool`) und Dienstname (`pve-disk-tool`) können bleiben, damit der automatische Abgleich unverändert läuft.
 4. In dieser Sitzung muss das Repo danach unter dem neuen Namen neu hinzugefügt werden.

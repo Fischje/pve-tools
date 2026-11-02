@@ -171,3 +171,75 @@ export function testsList(engine, { limit = 300, hostId = null } = {}) {
   }
   return { now: iso(now), running, runs: rows.slice(0, limit).map(shape) };
 }
+
+const DAY_MS = 864e5;
+const lv = (l) => ['ok', 'info', 'watch', 'replace'].indexOf(l);
+
+/**
+ * Backups und Snapshots je Host: Gäste mit Snapshot-Stand und letztem Backup, Zustand der Snapshot-Skripte, letzte Backup-Läufe.
+ * Es wird nur beobachtet. Ob ein Gast ein Backup bekommen soll, weiß das Tool in dieser Stufe nicht (die Ausschlussliste steht im Orchestrator),
+ * deshalb gibt es nur dann einen Hinweis, wenn ein Gast früher gesichert wurde und jetzt zu lange nicht mehr.
+ */
+export function backupOverview(engine) {
+  const now = engine.now(), t = now.getTime(), db = engine.db;
+  const hosts = engine.hosts.map((host) => {
+    const hs = db.getHostState(host.id);
+    const supported = (hs?.gateVersion ?? 1) >= 4;
+    const as = db.getAutosnap(host.id);
+    const tag = as?.tag ?? 'autosnap';
+    const uptimeMin = hs?.reachable && hs.uptimeSec != null ? (hs.uptimeSec + (now - hs.uptimeAt) / 1000) / 60 : 0;
+    const snaps = db.snapsOf(host.id);
+    const lastBk = new Map(db.lastBackups(host.id).map((r) => [r.vmid, r]));
+    const lastOk = new Map(db.lastOkBackups(host.id).map((r) => [r.vmid, r.start]));
+    const pauseToday = as?.pauseDay != null && now.getDay() === (as.pauseDay % 7);
+    const guests = db.guestsOf(host.id).filter((g) => !g.template).map((g) => {
+      const mine = snaps.filter((x) => x.vmid === g.vmid);
+      const by = (label) => { const l = mine.filter((x) => x.label === label); return { count: l.length, newest: l[0]?.ts ?? null, oldest: l.at(-1)?.ts ?? null }; };
+      const snapshots = { hourly: by('hourly'), weekly: by('weekly'), monthly: by('monthly'), other: mine.filter((x) => !x.label).length };
+      const tagged = g.tags.includes(tag);
+      const findings = [];
+      const add = (level, text) => findings.push({ level, text });
+      if (tagged && g.status === 'running' && as?.known) {
+        if (!as.enabled) add('info', 'Snapshots sind auf dem Host ausgeschaltet');
+        else {
+          const hAge = snapshots.hourly.newest ? (t - snapshots.hourly.newest) / 60000 : null;
+          if (hAge == null && uptimeMin > 90 && !pauseToday) add('watch', 'Noch kein Stunden-Snapshot vorhanden');
+          else if (hAge != null && hAge > 90 && uptimeMin > hAge && !pauseToday) add('watch', `Letzter Stunden-Snapshot vor ${Math.round(hAge / 60)} h, obwohl der Host läuft`);
+          if (as.keep?.hourly && snapshots.hourly.count > as.keep.hourly) add('info', `${snapshots.hourly.count} Stunden-Snapshots, vorgesehen sind ${as.keep.hourly}`);
+          const wAge = snapshots.weekly.newest ? (t - snapshots.weekly.newest) / DAY_MS : null;
+          if (wAge == null || wAge > 9) add('info', wAge == null ? 'Noch kein wöchentlicher Snapshot' : `Letzter wöchentlicher Snapshot vor ${Math.round(wAge)} Tagen (Sonntag 00:25, läuft nur, wenn der Host dann an ist)`);
+          const mAge = snapshots.monthly.newest ? (t - snapshots.monthly.newest) / DAY_MS : null;
+          if (mAge == null || mAge > 35) add('info', mAge == null ? 'Noch kein monatlicher Snapshot' : `Letzter monatlicher Snapshot vor ${Math.round(mAge)} Tagen (am 1. oder 2. um 00:45, läuft nur, wenn der Host dann an ist)`);
+        }
+      }
+      const bk = lastBk.get(g.vmid);
+      const okAt = lastOk.get(g.vmid) ?? null;
+      const backup = bk ? { result: bk.result, at: iso(bk.start), seconds: bk.seconds, note: bk.note, lastOkAt: iso(okAt) } : null;
+      if (bk?.result === 'failed') add('replace', `Letztes Backup fehlgeschlagen${bk.note ? `: ${bk.note.slice(0, 120)}` : ''}`);
+      else if (okAt && (t - okAt) / DAY_MS > 9) add('watch', `Kein Backup seit ${Math.round((t - okAt) / DAY_MS)} Tagen (üblich: wöchentlich montags)`);
+      const level = findings.reduce((a, f) => (lv(f.level) > lv(a) ? f.level : a), 'ok');
+      return { vmid: g.vmid, type: g.type, name: g.name, status: g.status, tags: g.tags, tagged, snapshots, backup, findings, level };
+    });
+    const tasks = db.tasksOf(host.id, 12).map((tk) => {
+      const gs = tk.parsed ? db.taskGuests(tk.upid) : [];
+      return { upid: tk.upid, start: iso(tk.start), end: iso(tk.end), minutes: tk.start && tk.end ? Math.round((tk.end - tk.start) / 60000) : null, status: tk.status, job: tk.job,
+        parsed: !!tk.parsed, ok: gs.filter((x) => x.result === 'ok').length, failed: gs.filter((x) => x.result === 'failed').length, interrupted: gs.filter((x) => x.result === 'interrupted').length,
+        guests: gs.map((x) => ({ vmid: x.vmid, type: x.type, result: x.result, seconds: x.seconds, note: x.note, name: guests.find((g) => g.vmid === x.vmid)?.name ?? null })) };
+    });
+    return {
+      id: host.id, label: host.label ?? host.id, reachable: !!hs?.reachable, supported, gate: { version: hs?.gateVersion ?? null, expected: EXPECTED_GATE_VERSION },
+      autosnap: as ? { ...as, ts: iso(as.ts), pauseToday } : null, guests, tasks, polledAt: iso(Number(db.getSetting(`backups_poll:${host.id}`) ?? 0) || null),
+    };
+  });
+  // Kennzahlen
+  const allTasks = hosts.flatMap((h) => h.tasks.map((x) => ({ ...x, hostId: h.id, hostLabel: h.label }))).filter((x) => x.start).sort((a, b) => b.start.localeCompare(a.start));
+  const guestsAll = hosts.flatMap((h) => h.guests.map((g) => ({ ...g, hostId: h.id })));
+  return {
+    now: iso(now), hosts, lastRun: allTasks[0] ?? null,
+    kpi: {
+      guests: guestsAll.length, snapshotsOn: hosts.filter((h) => h.autosnap?.enabled).length, snapshotsOff: hosts.filter((h) => h.autosnap?.known && !h.autosnap.enabled).length,
+      problems: guestsAll.filter((g) => lv(g.level) >= lv('watch')).length, failedBackups: guestsAll.filter((g) => g.backup?.result === 'failed').length,
+      runs30: allTasks.filter((x) => (t - Date.parse(x.start)) / DAY_MS <= 30).length,
+    },
+  };
+}

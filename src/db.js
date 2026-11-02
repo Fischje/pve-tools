@@ -21,6 +21,11 @@ CREATE INDEX IF NOT EXISTS testrun_serial ON testrun (serial, started);
 CREATE TABLE IF NOT EXISTS long_progress (serial TEXT PRIMARY KEY, next_lba INTEGER, total_lba INTEGER, lba_per_min REAL, segments INTEGER, started INTEGER);
 CREATE TABLE IF NOT EXISTS approval (host_id TEXT PRIMARY KEY, skip_date TEXT, snooze_until INTEGER, go_at INTEGER);
 CREATE TABLE IF NOT EXISTS alert_state (key TEXT PRIMARY KEY, level TEXT, alerted TEXT, updated INTEGER);
+CREATE TABLE IF NOT EXISTS guest (host_id TEXT NOT NULL, vmid INTEGER NOT NULL, type TEXT, name TEXT, status TEXT, tags TEXT, template INTEGER DEFAULT 0, seen INTEGER, PRIMARY KEY (host_id, vmid));
+CREATE TABLE IF NOT EXISTS snap (host_id TEXT NOT NULL, vmid INTEGER NOT NULL, name TEXT NOT NULL, label TEXT, ts INTEGER, description TEXT, PRIMARY KEY (host_id, vmid, name));
+CREATE TABLE IF NOT EXISTS backup_task (upid TEXT PRIMARY KEY, host_id TEXT NOT NULL, start INTEGER, end INTEGER, status TEXT, user TEXT, job TEXT, parsed INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS backup_guest (upid TEXT NOT NULL, vmid INTEGER NOT NULL, type TEXT, result TEXT, seconds INTEGER, note TEXT, PRIMARY KEY (upid, vmid));
+CREATE TABLE IF NOT EXISTS autosnap_state (host_id TEXT PRIMARY KEY, json TEXT, ts INTEGER);
 CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, host_id TEXT, serial TEXT, text TEXT NOT NULL);
 `;
 
@@ -109,6 +114,49 @@ export function openDb(dir) {
     getApproval: (hostId) => { const r = q('SELECT * FROM approval WHERE host_id=?').get(hostId); return r ? { skipDate: r.skip_date, snoozeUntil: d(r.snooze_until), goAt: d(r.go_at) } : {}; },
     setApproval: (hostId, a) => q('INSERT INTO approval(host_id,skip_date,snooze_until,go_at) VALUES(?,?,?,?) ON CONFLICT(host_id) DO UPDATE SET skip_date=excluded.skip_date,snooze_until=excluded.snooze_until,go_at=excluded.go_at')
       .run(hostId, a.skipDate ?? null, ms(a.snoozeUntil), ms(a.goAt)),
+
+    // ---- Backups und Snapshots (nur Beobachtung)
+    replaceGuests(hostId, guests, now) {
+      db.exec('BEGIN');
+      try {
+        q('DELETE FROM guest WHERE host_id=?').run(hostId);
+        const ins = q('INSERT INTO guest(host_id,vmid,type,name,status,tags,template,seen) VALUES(?,?,?,?,?,?,?,?)');
+        for (const g of guests) ins.run(hostId, g.vmid, g.type, g.name, g.status, g.tags.join(';'), g.template ? 1 : 0, ms(now));
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
+    },
+    guestsOf: (hostId) => q('SELECT vmid,type,name,status,tags,template,seen FROM guest WHERE host_id=? ORDER BY vmid').all(hostId).map((g) => ({ ...g, tags: g.tags ? g.tags.split(';') : [], template: !!g.template })),
+    replaceSnaps(hostId, snaps) {
+      db.exec('BEGIN');
+      try {
+        q('DELETE FROM snap WHERE host_id=?').run(hostId);
+        const ins = q('INSERT OR REPLACE INTO snap(host_id,vmid,name,label,ts,description) VALUES(?,?,?,?,?,?)');
+        for (const x of snaps) ins.run(hostId, x.vmid, x.name, x.label, x.ts, x.description ?? '');
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
+    },
+    snapsOf: (hostId) => q('SELECT vmid,name,label,ts,description FROM snap WHERE host_id=? ORDER BY ts DESC').all(hostId),
+    upsertTask: (hostId, t) => q(`INSERT INTO backup_task(upid,host_id,start,end,status,user) VALUES(?,?,?,?,?,?)
+      ON CONFLICT(upid) DO UPDATE SET start=excluded.start,end=excluded.end,status=excluded.status,user=excluded.user`).run(t.upid, hostId, t.start, t.end, t.status, t.user),
+    unparsedTasks: (hostId, limit = 10) => q('SELECT upid FROM backup_task WHERE host_id=? AND parsed=0 AND end IS NOT NULL ORDER BY start DESC LIMIT ?').all(hostId, limit),
+    setTaskResult(upid, job, guests) {
+      db.exec('BEGIN');
+      try {
+        q('DELETE FROM backup_guest WHERE upid=?').run(upid);
+        const ins = q('INSERT OR REPLACE INTO backup_guest(upid,vmid,type,result,seconds,note) VALUES(?,?,?,?,?,?)');
+        for (const g of guests) ins.run(upid, g.vmid, g.type, g.result, g.seconds, g.note ?? '');
+        q('UPDATE backup_task SET parsed=1, job=? WHERE upid=?').run(job, upid);
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
+    },
+    tasksOf: (hostId, limit = 20) => q('SELECT upid,start,end,status,user,job,parsed FROM backup_task WHERE host_id=? ORDER BY start DESC LIMIT ?').all(hostId, limit),
+    taskGuests: (upid) => q('SELECT vmid,type,result,seconds,note FROM backup_guest WHERE upid=? ORDER BY vmid').all(upid),
+    /** Letztes Backup je Gast: neuester Lauf, in dem der Gast vorkam. */
+    lastBackups: (hostId) => q(`SELECT g.vmid, g.result, g.seconds, g.note, t.start, t.end, t.upid FROM backup_guest g JOIN backup_task t ON t.upid = g.upid
+      WHERE t.host_id=? AND g.result IN ('ok','failed') AND t.start = (SELECT MAX(t2.start) FROM backup_task t2 JOIN backup_guest g2 ON g2.upid = t2.upid WHERE t2.host_id=t.host_id AND g2.vmid=g.vmid AND g2.result IN ('ok','failed'))`).all(hostId),
+    lastOkBackups: (hostId) => q(`SELECT g.vmid, MAX(t.start) AS start FROM backup_guest g JOIN backup_task t ON t.upid = g.upid WHERE t.host_id=? AND g.result='ok' GROUP BY g.vmid`).all(hostId),
+    setAutosnap: (hostId, obj, ts) => q('INSERT INTO autosnap_state(host_id,json,ts) VALUES(?,?,?) ON CONFLICT(host_id) DO UPDATE SET json=excluded.json,ts=excluded.ts').run(hostId, JSON.stringify(obj), ms(ts)),
+    getAutosnap: (hostId) => { const r = q('SELECT json,ts FROM autosnap_state WHERE host_id=?').get(hostId); return r ? { ...JSON.parse(r.json), ts: r.ts } : null; },
 
     getAlert: (key) => q('SELECT level, alerted, updated FROM alert_state WHERE key=?').get(key) ?? null,
     setAlert: (key, level, alerted, ts) => q('INSERT INTO alert_state(key,level,alerted,updated) VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE SET level=excluded.level,alerted=excluded.alerted,updated=excluded.updated').run(key, level, alerted, ms(ts)),

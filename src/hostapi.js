@@ -1,6 +1,7 @@
 // Spricht über einen Transport mit dem Gate-Skript des Hosts und liefert normalisierte Daten.
 import { normalize } from './smart.js';
 import { parseZpoolStatus, parseZpoolList } from './zfs.js';
+import { parseGuests, parseSnapshots, parseTasks, parseVzdumpLog, parseAutosnap } from './backups.js';
 
 export class HostClient {
   constructor(transport) { this.t = transport; }
@@ -45,6 +46,13 @@ export class HostClient {
     const r = await this.t.run('zpoollist', 30000);
     return r.code === 0 ? parseZpoolList(r.stdout) : {};
   }
+
+  // ---- Backups und Snapshots (nur lesend, braucht Prüfskript ab Version 4)
+  async guests() { const r = await this.t.run('guests', 60000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Gäste nicht lesbar'); return parseGuests(r.stdout); }
+  async snapshots() { const r = await this.t.run('snapshots', 240000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Snapshots nicht lesbar'); return parseSnapshots(r.stdout); }
+  async backupTasks() { const r = await this.t.run('tasks', 60000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Aufgaben nicht lesbar'); return parseTasks(r.stdout); }
+  async backupTaskLog(upid) { const r = await this.t.run(`tasklog ${upid}`, 120000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Protokoll nicht lesbar'); return parseVzdumpLog(r.stdout); }
+  async autosnap() { const r = await this.t.run('autosnap', 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Snapshot-Zustand nicht lesbar'); return parseAutosnap(r.stdout); }
 
   /** Test starten. plan: {test:'short'|'long'} oder {test:'select', from, to}. */
   async startTest(device, plan) {

@@ -9,7 +9,7 @@ import { Engine } from './engine.js';
 import { Auth } from './auth.js';
 import { HostClient } from './hostapi.js';
 import { SshTransport } from './transport.js';
-import { overview, diskDetail, cleanSettings, statsOverview, testsList } from './service.js';
+import { overview, diskDetail, cleanSettings, statsOverview, testsList, backupOverview } from './service.js';
 import { isPrivateIp } from './net.js';
 import { Provisioner, writeHostsFile } from './provision.js';
 import { Notifier, cleanMail } from './notify.js';
@@ -107,6 +107,7 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       } catch (e) { return send(res, 400, { error: e.message }); }
       return send(res, 200, engine.pollingSettings());
     }
+    if (route === 'GET /api/backups') return send(res, 200, backupOverview(engine));
     if (route === 'GET /api/stats') return send(res, 200, statsOverview(engine));
     if (route === 'GET /api/tests') {
       const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit')) || 300));
@@ -127,7 +128,7 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
         return send(res, 200, { ok: true });
       }
       if (m[2] === 'settings' && req.method === 'DELETE') { db.setHostSettings(hostId, {}); return send(res, 200, { ok: true }); }
-      if (m[2] === 'poll' && req.method === 'POST') { await engine.pollHost(hostId); return send(res, 200, { ok: true }); }
+      if (m[2] === 'poll' && req.method === 'POST') { await engine.pollHost(hostId, { force: true }); return send(res, 200, { ok: true }); }
       if (m[2] === 'approval' && req.method === 'POST') {
         const b = await readBody(req);
         try { engine.setApproval(hostId, b.action); } catch (e) { return send(res, 400, { error: e.message }); }

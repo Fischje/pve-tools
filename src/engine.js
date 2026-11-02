@@ -41,7 +41,7 @@ export class Engine {
   event(hostId, serial, text) { this.db.addEvent(this.now(), hostId, serial, text); this.log(`[${hostId}] ${text}`); }
 
   /** Eine Abfrage eines Hosts: Laufzeit, Platten, SMART, Testergebnisse, ZFS. */
-  async pollHost(hostId) {
+  async pollHost(hostId, { force = false } = {}) {
     const now = this.now();
     const client = this.client(hostId);
     const prev = this.db.getHostState(hostId);
@@ -80,7 +80,30 @@ export class Engine {
       } catch (e) { this.event(hostId, null, `${dev.device}: ${e.message}`); }
     }
     this.db.setHostState(hostId, { lastPoll: now, reachable: true, uptimeSec: uptime, uptimeAt: now, pools, error: null, gateVersion });
+    if ((gateVersion ?? 1) >= 4) await this.pollBackups(hostId, client, now, force);
     try { await this.notifier?.evaluateHost(hostId); } catch (e) { this.log(`Benachrichtigung fehlgeschlagen: ${e.message}`); }
+  }
+
+  /** Gäste, Snapshots, vzdump-Läufe und Zustand der Snapshot-Skripte lesen. Höchstens einmal pro Stunde, außer auf Knopfdruck. */
+  async pollBackups(hostId, client, now, force = false) {
+    const key = `backups_poll:${hostId}`;
+    const last = Number(this.db.getSetting(key) ?? 0);
+    if (!force && now.getTime() - last < 55 * MIN) return;
+    this.db.setSetting(key, now.getTime());
+    const step = async (name, fn) => { try { return await fn(); } catch (e) { this.log(`[${hostId}] ${name}: ${e.message}`); return null; } };
+    const guests = await step('Gäste', () => client.guests());
+    if (guests) this.db.replaceGuests(hostId, guests, now);
+    if (guests?.length) { const sn = await step('Snapshots', () => client.snapshots()); if (sn) this.db.replaceSnaps(hostId, sn); }
+    const as = await step('Snapshot-Skripte', () => client.autosnap());
+    if (as) this.db.setAutosnap(hostId, as, now);
+    const tasks = await step('Backup-Aufgaben', () => client.backupTasks());
+    if (tasks) {
+      for (const t of tasks) this.db.upsertTask(hostId, t);
+      for (const { upid } of this.db.unparsedTasks(hostId, 10)) {
+        const r = await step('Backup-Protokoll', () => client.backupTaskLog(upid));
+        if (r) this.db.setTaskResult(upid, r.job, r.guests);
+      }
+    }
   }
 
   /** Läuft ein von uns gestarteter Test nicht mehr? Dann Ergebnis aus dem Testprotokoll lesen und verbuchen. */

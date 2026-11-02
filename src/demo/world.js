@@ -1,6 +1,7 @@
 // Simulierte Hosts für den Demo-Modus und die Tests: antwortet wie das Gate-Skript, mit Beispieldaten und simulierten Tests.
 import * as fx from './fixtures.js';
 import { EXPECTED_GATE_VERSION } from '../gate-version.js';
+import { demoGuests, demoSnapshots, demoBackups, demoAutosnapText } from './backups.js';
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 function as(json, device, serial, model, capBytes) {
@@ -124,6 +125,11 @@ export class DemoTransport {
     const ok = (o) => ({ code: 0, stdout: typeof o === 'string' ? o : JSON.stringify(o), stderr: '' });
     switch (a[0]) {
       case 'version': return ok(String(this.id === 'pbs' ? EXPECTED_GATE_VERSION - 1 : EXPECTED_GATE_VERSION)); // pbs ist in der Demo absichtlich veraltet
+      case 'guests': { if (this.id === 'pbs') return ok(''); const g = demoGuests(this.id); return ok(`lxc\t${JSON.stringify(g)}\nqemu\t[]\n`); }
+      case 'snapshots': { if (this.id === 'pbs') return ok(''); return ok(demoSnapshots(this.id, w.clock()).map((r) => `${r.type}\t${r.vmid}\t${JSON.stringify(r.list)}`).join('\n') + '\n'); }
+      case 'tasks': { if (this.id === 'pbs') return ok(''); return ok(JSON.stringify(demoBackups(this.id, w.clock()).tasks)); }
+      case 'tasklog': { const log = demoBackups(this.id, w.clock()).logs[a[1]]; return log ? ok(JSON.stringify(log)) : { code: 64, stdout: '', stderr: 'gate: unbekannte Aufgabe' }; }
+      case 'autosnap': { if (this.id === 'pbs') return ok(''); return ok(demoAutosnapText(this.id, w.clock())); }
       case 'uptime': return ok(String((w.clock().getTime() - st.bootAt) / 1000));
       case 'list': return ok({ blockdevices: [...st.disks.values()].map((d) => ({ name: d.json.device.name.slice(5), type: 'disk', model: d.json.model_name, serial: d.json.serial_number, size: d.json.user_capacity.bytes, rota: d.json.rotation_rate > 0, tran: d.json.device.protocol === 'NVMe' ? 'nvme' : 'sata' })) });
       case 'zpool': { const h = w.hosts.find((x) => x.id === this.id); const t = zpoolStatusText(h.pools); return ok(st.scrub ? t.replace(/scrub repaired[^\n]*/, 'scrub in progress since Tue Nov  3 10:00:00 2026\n\t1.20T scanned at 1.0G/s, 400G issued at 500M/s, 3.00T total\n\t10.00% done, 05:00:00 to go') : t); }

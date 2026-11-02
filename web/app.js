@@ -6,11 +6,12 @@ import { HOURS_HINT, fmtCount, WD, KIND, ICON, LABEL, RUN_LABEL, RESULT, h, put,
 import { globalStats, hostStatsSection } from './stats-view.js';
 import { runningPanel, hostTestsPanel, allTestsPanel } from './tests-view.js';
 import { hostPage } from './host-view.js';
+import { backupsView } from './backups-view.js';
 
 const BRAND = "Fischje's PVE-Tools";
 document.title = BRAND;
 const root = document.getElementById('app');
-let data = null, stats = null, tests = null, view = 'uebersicht', authState = { passwordSet: false, loggedIn: true }, timer = null, dialogOpen = false, flash = {};
+let data = null, stats = null, tests = null, backups = null, view = 'uebersicht', authState = { passwordSet: false, loggedIn: true }, timer = null, dialogOpen = false, flash = {};
 
 async function api(method, path, body) {
   const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'disktool' }, body: body ? JSON.stringify(body) : undefined });
@@ -397,8 +398,8 @@ function render() {
   if (dialogOpen) return;
   if (!authState.loggedIn) { root.replaceChildren(loginView()); return; }
   if (!data) { root.replaceChildren(h('p', { class: 'empty' }, 'Lade …')); return; }
-  const tabs = [['uebersicht', 'Übersicht'], ['host', 'Hosts im Detail'], ['tests', 'Tests'], ['zeitplan', 'Zeitplan & Konto'], ['hosts', 'Hosts einrichten'], ['hilfe', 'Hilfe']];
-  const body = { uebersicht: viewOverview, host: viewHostPage, tests: viewTests, zeitplan: viewSettings, hosts: viewHosts, hilfe: viewHelp }[view]();
+  const tabs = [['uebersicht', 'Übersicht'], ['host', 'Hosts im Detail'], ['backups', 'Backups & Snapshots'], ['tests', 'Tests'], ['zeitplan', 'Zeitplan & Konto'], ['hosts', 'Hosts einrichten'], ['hilfe', 'Hilfe']];
+  const body = { uebersicht: viewOverview, host: viewHostPage, backups: () => backupsView(backups, data), tests: viewTests, zeitplan: viewSettings, hosts: viewHosts, hilfe: viewHelp }[view]();
   const f = flash.err ? h('div', { class: 'banner warn', role: 'alert' }, h('b', {}, flash.err)) : flash.ok ? h('div', { class: 'banner', role: 'status' }, flash.ok) : null; flash = {};
   const scrollY = window.scrollY;
   root.replaceChildren(...[
@@ -416,12 +417,12 @@ async function load(redraw = true) {
     const st = await fetch('/api/auth/status').then((r) => r.json());
     authState = st;
     if (!st.loggedIn) { render(); return; }
-    [data, stats, tests] = await Promise.all([api('GET', '/api/overview'), api('GET', '/api/stats'), api('GET', '/api/tests?limit=400')]);
+    [data, stats, tests, backups] = await Promise.all([api('GET', '/api/overview'), api('GET', '/api/stats'), api('GET', '/api/tests?limit=400'), api('GET', '/api/backups').catch(() => null)]);
     if (redraw) render();
   } catch (e) { if (!data) root.replaceChildren(h('p', { class: 'empty error' }, `Keine Verbindung: ${e.message}`)); }
 }
 
-Object.assign(ctx, { act, api, startTest, abortTest, openDetail, diskCard, render: () => render() });
+Object.assign(ctx, { act, api, startTest, abortTest, openDetail, diskCard, render: () => render(), openUpdate: (host) => { view = 'hosts'; wizard = { mode: 'update', host, step: 1 }; render(); window.scrollTo(0, 0); } });
 
 load();
 timer = setInterval(() => { if (view !== 'zeitplan' && view !== 'hosts' && !dialogOpen) load(); }, 20000);

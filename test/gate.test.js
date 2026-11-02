@@ -10,7 +10,8 @@ const bin = mkdtempSync(path.join(tmpdir(), 'gate-'));
 writeFileSync(path.join(bin, 'lsblk'), '#!/usr/bin/env bash\nif [[ "$*" == *"-dn"* ]]; then printf "sda disk\\nsda1 part\\nnvme0n1 disk\\nloop0 loop\\n"; else echo "lsblk $*"; fi\n');
 writeFileSync(path.join(bin, 'smartctl'), '#!/usr/bin/env bash\necho "smartctl $*"\n');
 writeFileSync(path.join(bin, 'zpool'), '#!/usr/bin/env bash\necho "zpool $*"\n');
-for (const f of ['lsblk', 'smartctl', 'zpool']) chmodSync(path.join(bin, f), 0o755);
+writeFileSync(path.join(bin, 'pvesh'), '#!/usr/bin/env bash\ncase "$2" in\n */lxc) echo \'[{"vmid":109},{"vmid":112}]\' ;;\n */qemu) echo \'[]\' ;;\n */snapshot) echo \'[{"name":"current"}]\' ;;\n *) echo "pvesh $*" ;;\nesac\n');
+for (const f of ['lsblk', 'smartctl', 'zpool', 'pvesh']) chmodSync(path.join(bin, f), 0o755);
 const gate = path.resolve('host-setup/gate.sh');
 
 function run(command) {
@@ -30,6 +31,24 @@ test('erlaubte Befehle', () => {
   assert.match(run('version').out, /^\d+$/);
   assert.equal(run('zpool').out, 'zpool status -p');
   assert.equal(run('zpoollist').out, 'zpool list -H -p -o name,size,alloc,free,frag,cap,health');
+});
+
+test('Backup-Überwachung (nur lesend): Gäste, Snapshots, vzdump-Aufgaben, Protokoll, Zustand der Snapshot-Skripte', () => {
+  const g = run('guests').out.split('\n');
+  assert.match(g[0], /^lxc\t\[\{"vmid":109\},\{"vmid":112\}\]$/);
+  assert.equal(g[1], 'qemu\t[]');
+  const sn = run('snapshots').out.split('\n');
+  assert.deepEqual(sn, ['lxc\t109\t[{"name":"current"}]', 'lxc\t112\t[{"name":"current"}]']);
+  assert.match(run('tasks').out, /tasks --typefilter vzdump --limit 40 --output-format json$/);
+  const upid = 'UPID:pve:0000ABCD:0123ABCD:6543210A:vzdump::root@pam:';
+  assert.match(run(`tasklog ${upid}`).out, /tasks\/UPID:pve:.*\/log --limit 20000/);
+  assert.match(run('autosnap').out, /^schalter: (an|aus)/);
+});
+
+test('Backup-Überwachung: ungültige UPID und Zusatzargumente werden abgelehnt', () => {
+  for (const c of ['tasklog', 'tasklog foo', 'tasklog UPID:x', 'tasklog UPID:pve:0000ABCD:0123ABCD:6543210A:vzdump::root@pam: extra', 'guests 1', 'snapshots all', 'tasks 5', 'autosnap on', 'tasklog UPID:pve:0000ABCD:..:../etc/passwd:vzdump::root@pam:;id']) {
+    assert.equal(run(c).code, 64, c);
+  }
 });
 
 test('abgelehnt: Partition, Loop-Gerät, unbekanntes Gerät, Pfad-Tricks', () => {

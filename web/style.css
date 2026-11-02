@@ -171,3 +171,5 @@ label.f.inline { flex-direction: row; align-items: center; gap: 6px; }
 .donut-row table { flex: 1; min-width: 240px; font-size: .85rem; }
 
 .brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; } .brand b { font-size: 1.05rem; letter-spacing: .01em; }
+
+.sub.bad, .bad { color: var(--critical); }
