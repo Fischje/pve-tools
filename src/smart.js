@@ -57,6 +57,8 @@ export function normalize(json, info = {}) {
     hours: json.power_on_time?.hours ?? json.nvme_smart_health_information_log?.power_on_hours ?? null,
     temperature: json.temperature?.current ?? json.nvme_smart_health_information_log?.temperature ?? null,
     smartPassed: json.smart_status?.passed ?? null,
+    powerCycles: json.power_cycle_count ?? json.nvme_smart_health_information_log?.power_cycles ?? null,
+    bytesWritten: null, unsafeShutdowns: null,
     attrs: {}, ata: null, nvme: null, wearUsed: null, remainingLife: null,
     selftest: { running: false, remainingPercent: null, pollingShort: null, pollingExtended: null, selective: false, log: [] },
     ataErrorCount: json.ata_smart_error_log?.summary?.count ?? 0,
@@ -71,6 +73,9 @@ export function normalize(json, info = {}) {
       mediaErrors: h.media_errors ?? 0, unsafeShutdowns: h.unsafe_shutdowns ?? 0,
       dataUnitsWritten: h.data_units_written ?? null, powerCycles: h.power_cycles ?? null,
     };
+    // Eine „Data Unit“ sind 1000 Blöcke zu 512 Byte (NVMe-Spezifikation).
+    disk.bytesWritten = h.data_units_written != null ? h.data_units_written * 512000 : null;
+    disk.unsafeShutdowns = h.unsafe_shutdowns ?? null;
     disk.wearUsed = h.percentage_used ?? null;
     disk.remainingLife = disk.wearUsed == null ? null : Math.max(0, 100 - disk.wearUsed);
     const log = json.nvme_self_test_log ?? {};
@@ -93,6 +98,13 @@ export function normalize(json, info = {}) {
       failingAttrs: Object.values(disk.attrs).filter((a) => a.whenFailed === 'FAILING_NOW').map((a) => a.name),
       pastFailedAttrs: Object.values(disk.attrs).filter((a) => a.whenFailed === 'In_the_past').map((a) => a.name),
     };
+    // Geschriebene Datenmenge: je nach Hersteller als GiB, als 32-MiB-Einheiten oder als Anzahl Blöcke angegeben.
+    const lbs = json.logical_block_size ?? 512;
+    const written = byName('Host_Writes_GiB') ? byName('Host_Writes_GiB').raw * 2 ** 30
+      : byName('Host_Writes_32MiB') ? byName('Host_Writes_32MiB').raw * 32 * 2 ** 20
+      : byName('Total_LBAs_Written') ? byName('Total_LBAs_Written').raw * lbs : null;
+    disk.bytesWritten = written != null && Number.isFinite(written) ? written : null;
+    disk.unsafeShutdowns = disk.ata.unexpectedPowerLoss;
     if (kind === 'ssd') {
       const wear = SSD_LIFE_LEFT_NAMES.map(byName).find(Boolean);
       if (wear) {

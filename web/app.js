@@ -1,7 +1,7 @@
 // Oberfläche von pve-disk-tool. Reines JavaScript ohne Abhängigkeiten.
 // Alle Texte werden per textContent eingesetzt, nie als HTML (kein XSS durch Gerätenamen o. Ä.).
 
-import { WD, KIND, ICON, LABEL, RUN_LABEL, RESULT, h, put, d2, fmtDate, fmtDT, fmtSize, fmtAge, fmtUp, pill, fact, meter, topFinding, wearLevel, ctx, fmtDay, fmtMin, dur } from './dom.js';
+import { HOURS_HINT, fmtCount, WD, KIND, ICON, LABEL, RUN_LABEL, RESULT, h, put, d2, fmtDate, fmtDT, fmtSize, fmtAge, fmtUp, pill, fact, meter, topFinding, wearLevel, ctx, fmtDay, fmtMin, dur } from './dom.js';
 
 import { globalStats, hostStatsSection } from './stats-view.js';
 import { runningPanel, hostTestsPanel, allTestsPanel } from './tests-view.js';
@@ -34,7 +34,8 @@ const abortTest = (d) => confirm(`Laufenden Test auf ${d.device} abbrechen?`) &&
 // ---------- Ansicht: Übersicht ----------
 function diskCard(host, d) {
   const tf = topFinding(d);
-  const facts = [fact('Alter', fmtAge(d.hours)), fact('Temperatur', d.temperature != null ? `${d.temperature} °C` : '–'), fact('Größe', fmtSize(d.capacityBytes)), fact('Wert', d.score != null ? `${d.score} / 100` : '–')];
+  const facts = [fact('Betriebszeit', fmtAge(d.hours), HOURS_HINT), fact('Temperatur', d.temperature != null ? `${d.temperature} °C` : '–'), fact('Größe', fmtSize(d.capacityBytes)), fact('Wert', d.score != null ? `${d.score} / 100` : '–'),
+    fact('Einschaltvorgänge', fmtCount(d.powerCycles), 'Wie oft die Platte eingeschaltet wurde. Bei einem Server, der täglich an- und ausgeht, entspricht das grob den Betriebstagen.'), fact('Geschrieben', d.bytesWritten != null ? fmtSize(d.bytesWritten) : '–', 'Insgesamt auf die Platte geschriebene Datenmenge. Zusammen mit dem Verschleiß zeigt das, wie stark sie genutzt wurde.')];
   const kids = [
     h('div', { class: 'card-head' },
       h('div', {}, h('div', { class: 'model' }, d.model, h('span', { class: 'badge' }, KIND[d.kind] ?? d.kind)), h('div', { class: 'sub' }, `${d.device} · ${d.serial}`)),
@@ -340,6 +341,7 @@ function viewHelp() {
     D('ZFS-Pool und vdev', 'Ein Pool besteht aus einem oder mehreren vdevs, und ein vdev aus Platten. Fällt ein ganzes vdev aus, ist der Pool verloren. Innerhalb eines Spiegels oder RAID-Z dürfen so viele Platten ausfallen, wie dort angegeben ist.'),
     D('Lese-, Schreib- und Prüfsummenfehler', 'ZFS zählt je Gerät Fehler mit. Prüfsummenfehler bedeuten, dass Daten beim Lesen nicht stimmten. Ein Scrub korrigiert sie meist. Steigen sie weiter, liegt es oft an Kabel, Backplane oder der Platte.'),
     D('Scrub', 'ZFS liest dabei alle Daten und prüft sie gegen die Prüfsummen. Proxmox startet das normalerweise monatlich.'),
+    D('Betriebszeit', 'Die Platte zählt selbst mit, wie lange sie in Betrieb war. Das ist nicht ihr Alter seit dem Kauf: Zeiten, in denen der Rechner aus ist (bei dir nachts), zählen nicht, und bei NVMe können auch Zeiten im Energiesparmodus fehlen. Einschaltvorgänge und die geschriebene Datenmenge helfen bei der Einordnung.'),
     D('Prüfskript auf dem Host', 'Ein kleines Skript unter /etc/diskmon, das dem Tool nur wenige, fest vorgegebene Befehle erlaubt. Es hat eine Versionsnummer. Ist die Version auf einem Host älter als im Tool, steht „veraltet“, und ein Klick unter „Hosts einrichten“ aktualisiert es.'),
     D('Statistiken', 'Auf der Startseite siehst du Tests pro Monat, wann Tests laufen, Ergebnisse, Abdeckung und Testverlauf, darunter dieselben Zahlen je Host. Der Verlauf beginnt mit dem Tag, ab dem das Tool läuft.'),
     D('Wert (0–100)', 'Grobe Kennzahl aus der Bewertung: 100 gesund, darunter schlechter. Bei SSD/NVMe höchstens die Restlebensdauer.')));
@@ -361,12 +363,17 @@ async function openDetail(host, d) {
   };
   const hist = detail.history;
   const series = [spark('Temperatur', hist.map((x) => ({ v: x.temp })), ' °C'), d.kind !== 'hdd' ? spark('Verschleiß', hist.map((x) => ({ v: x.wearUsed })), ' %') : spark('Umgelagerte Sektoren', hist.map((x) => ({ v: x.reallocated })), ''), d.kind === 'hdd' ? spark('Übertragungsfehler (CRC)', hist.map((x) => ({ v: x.crc })), '') : null].filter(Boolean);
+  const counters = h('div', {}, h('h3', {}, 'Zähler der Platte'), h('table', {}, h('tbody', {}, [
+    ['Betriebszeit', d.hours != null ? `${fmtCount(d.hours)} Stunden (${fmtAge(d.hours)})` : '–'], ['Einschaltvorgänge', fmtCount(d.powerCycles)],
+    ['Unsaubere Abschaltungen', d.unsafeShutdowns != null ? fmtCount(d.unsafeShutdowns) : '–'], ['Insgesamt geschrieben', d.bytesWritten != null ? fmtSize(d.bytesWritten) : '–']].map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v))))),
+    h('p', { class: 'sub' }, `${HOURS_HINT} Unsaubere Abschaltungen: Die Platte wurde vom Strom getrennt, ohne vorher abgemeldet zu werden.`));
   const attrTable = d.attrs.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['ID', 'Attribut', 'Wert', 'Schlechtester', 'Grenze', 'Rohwert'].map((t) => h('th', {}, t)))), h('tbody', {}, d.attrs.map((a) => h('tr', {}, h('td', {}, a.id), h('td', {}, a.name), h('td', {}, a.value), h('td', {}, a.worst), h('td', {}, a.thresh), h('td', {}, a.raw)))))) : null;
   const nvmeTable = d.nvme ? h('table', {}, h('tbody', {}, [['Kritische Warnung', d.nvme.criticalWarning], ['Verfügbare Reserve', `${d.nvme.availableSpare} % (Grenze ${d.nvme.spareThreshold} %)`], ['Verschleiß', `${d.nvme.percentageUsed} %`], ['Medienfehler', d.nvme.mediaErrors], ['Unsaubere Abschaltungen', d.nvme.unsafeShutdowns], ['Einschaltvorgänge', d.nvme.powerCycles]].map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v))))) : null;
   dlg.append(
     h('div', { class: 'dlg-head' }, h('div', {}, h('h2', {}, d.model), h('div', { class: 'sub' }, `${host.label} · ${d.device} · ${d.serial} · ${fmtSize(d.capacityBytes)} · ${KIND[d.kind]}`)), pill(d.level), h('button', { onclick: () => dlg.close() }, 'Schließen')),
     h('div', { class: 'dlg-body' },
       h('div', {}, h('h3', {}, 'Befunde'), d.findings.map((f) => h('div', { class: `finding ${f.level}` }, h('b', {}, `${ICON[f.level] ?? ''} ${f.title}`), f.text, f.advice ? h('div', { class: 'advice' }, `Was tun? ${f.advice}`) : null))),
+      counters,
       series.length ? h('div', {}, h('h3', {}, 'Verlauf'), series) : h('p', { class: 'sub' }, 'Der Verlauf erscheint, sobald mehrere Messungen vorliegen.'),
       h('div', {}, h('h3', {}, 'Tests'), d.runs.length ? h('table', {}, h('thead', {}, h('tr', {}, ['Start', 'Art', 'Ergebnis', 'Hinweis'].map((t) => h('th', {}, t)))), h('tbody', {}, d.runs.map((r) => h('tr', {}, h('td', {}, fmtDT(r.started)), h('td', {}, RUN_LABEL[r.kind] ?? r.kind), h('td', {}, RESULT[r.result] ?? r.result), h('td', {}, r.note ?? ''))))) : h('p', { class: 'sub' }, 'Vom Tool wurden noch keine Tests gestartet.')),
       nvmeTable ? h('div', {}, h('h3', {}, 'NVMe-Werte'), nvmeTable) : null,

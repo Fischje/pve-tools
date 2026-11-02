@@ -132,3 +132,17 @@ test('ein später abgebrochener Test überdeckt einen früheren Fehlschlag nicht
   assert.equal(res.level, 'replace');
   assert.ok(codes(res).includes('test-failed'));
 });
+
+test('Einschaltvorgänge, geschriebene Datenmenge und unsaubere Abschaltungen werden gelesen', () => {
+  const n = normalize(fx.nvme({ unsafe: 137 }));
+  assert.equal(n.powerCycles, 40);
+  assert.equal(n.bytesWritten, 20000000 * 512000); // 10,24 TB
+  assert.equal(n.unsafeShutdowns, 137);
+  const ssd = normalize(fx.wdSsd86());
+  assert.equal(ssd.powerCycles, 198);
+  assert.equal(ssd.bytesWritten, 44780 * 2 ** 30); // Host_Writes_GiB
+  assert.equal(ssd.unsafeShutdowns, 99);
+  const hdd = fx.exos12(); hdd.ata_smart_attributes.table.push({ id: 241, name: 'Total_LBAs_Written', value: 100, worst: 100, thresh: 0, when_failed: '', raw: { value: 1000000, string: '1000000' } });
+  assert.equal(normalize(hdd).bytesWritten, 1000000 * 512);
+  assert.equal(normalize(fx.hdd6()).bytesWritten, null, 'ohne passendes Attribut: unbekannt statt geraten');
+});

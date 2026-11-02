@@ -117,7 +117,7 @@ export function wdSsd86(o = {}) {
   ];
   return ataBase({
     device: '/dev/sda', model: 'WDC WDS500G2B0A-00SM50', serial: '210623444409', firmware: '415020WD',
-    blocks: 976773168, rotation: 0, pollExtended: 10, pollShort: 2, selective: false, hours, attrs,
+    blocks: 976773168, rotation: 0, pollExtended: 10, pollShort: 2, selective: false, hours, cycles: 198, attrs,
     log: [ataLogEntry('short', 0, 33759), ataLogEntry('extended', 0, 32646)], ...o,
   });
 }

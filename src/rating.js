@@ -30,7 +30,7 @@ export function rate(disk, { baseline = null, longHintDays = 120 } = {}) {
   }
   rateSelfTests(disk, add, longHintDays, f);
 
-  if (disk.hours > 30000) add('info', 'old', 'Alt', `Die Platte läuft seit ${Math.round(disk.hours / 8766 * 10) / 10} Jahren (${disk.hours} Betriebsstunden).`, 'Das ist allein kein Defekt, aber ein Grund für aktuelle Backups.');
+  if (disk.hours > 30000) add('info', 'old', 'Lange Betriebszeit', `Die Platte hat ${String(Math.round(disk.hours / 8766 * 10) / 10).replace('.', ',')} Jahre Betriebszeit gesammelt (${disk.hours} Betriebsstunden).`, 'Das ist allein kein Defekt, aber ein Grund für aktuelle Backups.');
 
   const level = worst(f.filter((x) => x.level !== 'info').map((x) => x.level));
   const wearUsed = disk.wearUsed;

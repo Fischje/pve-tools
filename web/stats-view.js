@@ -60,7 +60,7 @@ export function globalStats(stats, data) {
   const d = stats.global.disks;
   return h('section', {}, h('div', { class: 'sec-title' }, h('h2', {}, 'Tests und Platten im Überblick')),
     testWidgets(stats.global, data, { labels }),
-    h('div', { class: 'kpis' }, kpi('Platten gesamt', d.count, `${d.byKind.hdd} HDD · ${d.byKind.ssd} SSD · ${d.byKind.nvme} NVMe`), kpi('Speicher gesamt', fmtSize(d.capacityBytes), 'Rohkapazität aller Platten'), kpi('Ø Alter', fmtAge(d.avgAgeHours), `älteste Platte: ${fmtAge(d.maxAgeHours)}`), kpi('Temperatur', d.avgTemp == null ? '–' : `${d.avgTemp} °C`, `Maximum ${d.maxTemp ?? '–'} °C`)));
+    h('div', { class: 'kpis' }, kpi('Platten gesamt', d.count, `${d.byKind.hdd} HDD · ${d.byKind.ssd} SSD · ${d.byKind.nvme} NVMe`), kpi('Speicher gesamt', fmtSize(d.capacityBytes), 'Rohkapazität aller Platten'), kpi('Ø Betriebszeit', fmtAge(d.avgAgeHours), `längste: ${fmtAge(d.maxAgeHours)}`), kpi('Temperatur', d.avgTemp == null ? '–' : `${d.avgTemp} °C`, `Maximum ${d.maxTemp ?? '–'} °C`)));
 }
 
 let selected = null;
@@ -86,7 +86,7 @@ export function hostBody(stats, data, hostId) {
   const d = st.disks;
   const worstPool = host.pools.reduce((a, p) => (['ok', 'watch', 'replace', 'critical'].indexOf(p.level) > ['ok', 'watch', 'replace', 'critical'].indexOf(a) ? p.level : a), 'ok');
   const extra = h('div', { class: 'kpis' },
-    kpi('Platten', d.count, `${d.byKind.hdd} HDD · ${d.byKind.ssd} SSD · ${d.byKind.nvme} NVMe`), kpi('Speicher (roh)', fmtSize(d.capacityBytes), `Ø Alter ${fmtAge(d.avgAgeHours)}`),
+    kpi('Platten', d.count, `${d.byKind.hdd} HDD · ${d.byKind.ssd} SSD · ${d.byKind.nvme} NVMe`), kpi('Speicher (roh)', fmtSize(d.capacityBytes), `Ø Betriebszeit ${fmtAge(d.avgAgeHours)}`),
     kpi('Temperatur', d.avgTemp == null ? '–' : `${d.avgTemp} °C`, `Maximum ${d.maxTemp ?? '–'} °C`, d.maxTemp >= 55 ? 'watch' : ''),
     kpi('Verschleiß SSD/NVMe', d.avgWearUsed == null ? '–' : `Ø ${d.avgWearUsed} %`, d.maxWearUsed == null ? 'keine SSD/NVMe' : `höchster Wert ${d.maxWearUsed} %`, d.maxWearUsed >= 70 ? 'watch' : ''),
     kpi('ZFS-Pools', host.pools.length, host.pools.length ? host.pools.map((p) => `${p.name}${p.cap != null ? ` ${p.cap} %` : ''}`).join(' · ') : 'kein ZFS', worstPool === 'ok' ? 'ok' : worstPool === 'watch' ? 'watch' : 'bad'));

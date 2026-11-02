@@ -31,7 +31,9 @@ export const fmtSize = (b) => (b == null ? '–' : b >= 1e12 ? `${(b / 1e12).toF
 export const fmtAge = (hrs) => (hrs == null ? '–' : hrs >= 8766 ? `${(hrs / 8766).toFixed(1).replace('.', ',')} Jahre` : `${Math.round(hrs / 24)} Tage`);
 export const fmtUp = (s) => (s == null ? '–' : s >= 86400 ? `${Math.floor(s / 86400)} Tage` : s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min` : `${Math.floor(s / 60)} min`);
 export const pill = (level, text) => h('span', { class: `pill ${level}` }, h('span', { 'aria-hidden': 'true' }, ICON[level] ?? '?'), text ?? LABEL[level]);
-export const fact = (k, v) => h('div', { class: 'fact' }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
+export const fact = (k, v, title) => h('div', { class: 'fact', title }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
+export const HOURS_HINT = 'Betriebsstunden, die die Platte selbst zählt. Das ist nicht das Alter seit dem Kauf: Zeiten, in denen der Rechner aus ist, zählen nicht (bei NVMe können auch Zeiten im Energiesparmodus fehlen).';
+export const fmtCount = (n) => (n == null ? '–' : n.toLocaleString('de-DE'));
 export function meter(label, pct, level, right) {
   const bar = h('span'); bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
   return h('div', {}, h('div', { class: 'meter-label' }, h('span', {}, label), h('span', {}, right ?? `${pct} %`)), h('div', { class: `meter ${level}`, role: 'img', 'aria-label': `${label}: ${pct} Prozent` }, bar));

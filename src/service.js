@@ -84,7 +84,7 @@ export function overview(engine) {
       const runs = db.runsOfDisk(row.serial, 6).map((r) => ({ kind: r.kind, started: iso(r.started), ended: iso(r.ended), result: r.result, note: r.note, origin: r.origin }));
       levels.push(rating.level);
       return {
-        serial: row.serial, hostId: host.id, device: row.device, model: row.model, kind: row.kind, capacityBytes: row.capacity_bytes, hours: raw?.hours ?? null, temperature: raw?.temperature ?? null,
+        serial: row.serial, hostId: host.id, device: row.device, model: row.model, kind: row.kind, capacityBytes: row.capacity_bytes, hours: raw?.hours ?? null, powerCycles: raw?.powerCycles ?? null, bytesWritten: raw?.bytesWritten ?? null, unsafeShutdowns: raw?.unsafeShutdowns ?? null, temperature: raw?.temperature ?? null,
         standby: !!row.standby, paused: !!row.paused, lastSeen: iso(row.last_seen), selective: !!row.selective,
         level: rating.level, levelLabel: LEVEL_LABEL[rating.level], score: rating.score, healthText: rating.healthText, wearUsed: rating.wearUsed, remainingLife: rating.remainingLife,
         findings: rating.findings, pollingShort: row.polling_short, pollingExtended: row.polling_extended,
