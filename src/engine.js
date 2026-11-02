@@ -237,10 +237,13 @@ export class Engine {
     if (!['tool', 'cron'].includes(mode)) throw new Error('Ungültiger Modus');
     this.snapGuard(hostId);
     const c = this.client(hostId);
-    if (mode === 'tool') { await c.snapCron('off'); this.db.setSetting(`snapctl:${hostId}`, JSON.stringify({ ...this.snapCtl(hostId), mode })); }
-    else { this.db.setSetting(`snapctl:${hostId}`, JSON.stringify({ ...this.snapCtl(hostId), mode })); await c.snapCron('on'); }
+    if (mode === 'tool') {
+      const st = await c.snapCron('off');
+      if (/cron:\s*an\b/.test(st)) throw new Error('Der Cron auf dem Host ließ sich nicht ausschalten (/etc/cron.d/proxmox-autosnap ist noch aktiv).');
+      this.db.setSetting(`snapctl:${hostId}`, JSON.stringify({ ...this.snapCtl(hostId), mode }));
+    } else { this.db.setSetting(`snapctl:${hostId}`, JSON.stringify({ ...this.snapCtl(hostId), mode })); await c.snapCron('on'); }
+    await this.pollBackups(hostId, c, this.now(), true).catch(() => {});
     this.event(hostId, null, mode === 'tool' ? 'Snapshots: das Tool löst jetzt aus, der Cron auf dem Host ist aus' : 'Snapshots: zurück auf Cron auf dem Host');
-    this.pollBackups(hostId, c, this.now(), true).catch(() => {});
   }
   async setSnapSwitch(hostId, on) { this.snapGuard(hostId); await this.client(hostId).snapSwitch(on); this.event(hostId, null, `Snapshots ${on ? 'eingeschaltet' : 'ausgeschaltet'}`); this.pollBackups(hostId, this.client(hostId), this.now(), true).catch(() => {}); }
 

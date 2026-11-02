@@ -131,7 +131,7 @@ export class DemoTransport {
         const r = w.rights?.get(this.id) ?? (this.id === 'pve' ? ['snapshots'] : []);
         if (!r.includes('snapshots')) return { code: 64, stdout: '', stderr: "gate: Recht 'snapshots' ist für diesen Host nicht freigegeben" };
         (st.snapCalls ??= []).push(command);
-        if (a[0] === 'snap-cron') { if (a[1] === 'off') st.cronOff = true; if (a[1] === 'on') st.cronOff = false; return ok(`cron: ${st.cronOff ? 'vom-tool-aus' : 'an'}`); }
+        if (a[0] === 'snap-cron') { if (a[1] === 'off' && !st.cronStuck) st.cronOff = true; if (a[1] === 'on') st.cronOff = false; return ok(`cron: ${st.cronOff ? 'vom-tool-aus' : 'an'}`); }
         if (a[0] === 'snap-switch') { st.snapOff = a[1] === 'off'; return ok(`schalter: ${st.snapOff ? 'aus' : 'an'}`); }
         return st.snapFail ? { code: 1, stdout: '', stderr: 'autosnap: Fehler (Demo)' } : ok('autosnap: ok');
       }

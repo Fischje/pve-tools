@@ -227,3 +227,11 @@ test('Snapshots: Fehlschlag wird gemerkt und erst nach 15 Minuten wiederholt', a
   advance(15); await engine.pollHost('pve'); await engine.tickHost('pve');
   assert.equal(engine.snapLast('pve').hourly.ok, true);
 });
+
+test('Snapshots: lässt sich der Cron nicht ausschalten, bleibt es beim Cron und es gibt eine Fehlermeldung', async () => {
+  const { engine, world } = setup();
+  await engine.pollHost('pve');
+  world.state.get('pve').cronStuck = true;
+  await assert.rejects(() => engine.setSnapMode('pve', 'tool'), /ließ sich nicht ausschalten/);
+  assert.equal(engine.snapCtl('pve').mode, 'cron');
+});
