@@ -124,7 +124,8 @@ export class DemoTransport {
     const a = command.split(' ');
     const ok = (o) => ({ code: 0, stdout: typeof o === 'string' ? o : JSON.stringify(o), stderr: '' });
     switch (a[0]) {
-      case 'version': return ok(String(this.id === 'pbs' ? EXPECTED_GATE_VERSION - 1 : EXPECTED_GATE_VERSION)); // pbs ist in der Demo absichtlich veraltet
+      case 'version': return ok(String(this.id === 'pbs' ? 3 : EXPECTED_GATE_VERSION)); // pbs ist in der Demo absichtlich veraltet
+      case 'kernel': return ok('');
       case 'guests': { if (this.id === 'pbs') return ok(''); const g = demoGuests(this.id); return ok(`lxc\t${JSON.stringify(g)}\nqemu\t[]\n`); }
       case 'snapshots': { if (this.id === 'pbs') return ok(''); return ok(demoSnapshots(this.id, w.clock()).map((r) => `${r.type}\t${r.vmid}\t${JSON.stringify(r.list)}`).join('\n') + '\n'); }
       case 'tasks': { if (this.id === 'pbs') return ok(''); return ok(JSON.stringify(demoBackups(this.id, w.clock()).tasks)); }

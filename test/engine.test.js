@@ -173,5 +173,5 @@ test('Skript-Version des Hosts wird gespeichert', async () => {
   const { EXPECTED_GATE_VERSION } = await import('../src/gate-version.js');
   await engine.pollHost('pve'); await engine.pollHost('pbs');
   assert.equal(db.getHostState('pve').gateVersion, EXPECTED_GATE_VERSION);
-  assert.equal(db.getHostState('pbs').gateVersion, EXPECTED_GATE_VERSION - 1);
+  assert.equal(db.getHostState('pbs').gateVersion, 3);
 });

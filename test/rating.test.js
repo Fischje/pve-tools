@@ -146,3 +146,13 @@ test('Einschaltvorgänge, geschriebene Datenmenge und unsaubere Abschaltungen we
   assert.equal(normalize(hdd).bytesWritten, 1000000 * 512);
   assert.equal(normalize(fx.hdd6()).bytesWritten, null, 'ohne passendes Attribut: unbekannt statt geraten');
 });
+
+test('CRC: einzelner Wert ist nur Info, ein Anstieg gegenüber dem letzten Messpunkt wird sofort erkannt', () => {
+  const stable = r(fx.exos12({ crc: 51 }));
+  assert.equal(stable.level, 'ok');
+  assert.ok(stable.findings.some((f) => f.code === 'crc-stable' && f.level === 'info'));
+  const rising = r(fx.exos12({ crc: 55 }), { crcBaseline: { crc: 51 } });
+  assert.equal(rising.level, 'watch');
+  assert.ok(rising.findings.some((f) => f.code === 'crc' && /nehmen zu/.test(f.title)));
+  assert.equal(r(fx.exos12({ crc: 51 }), { crcBaseline: { crc: 51 } }).level, 'ok');
+});

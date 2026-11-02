@@ -10,8 +10,9 @@ const bin = mkdtempSync(path.join(tmpdir(), 'gate-'));
 writeFileSync(path.join(bin, 'lsblk'), '#!/usr/bin/env bash\nif [[ "$*" == *"-dn"* ]]; then printf "sda disk\\nsda1 part\\nnvme0n1 disk\\nloop0 loop\\n"; else echo "lsblk $*"; fi\n');
 writeFileSync(path.join(bin, 'smartctl'), '#!/usr/bin/env bash\necho "smartctl $*"\n');
 writeFileSync(path.join(bin, 'zpool'), '#!/usr/bin/env bash\necho "zpool $*"\n');
+writeFileSync(path.join(bin, 'journalctl'), '#!/usr/bin/env bash\nif [[ "$1" == "-k" ]]; then printf "2026-11-01T16:35:07+01:00 h kernel: ata4: SATA link up 1.5 Gbps\\n2026-11-01T16:35:08+01:00 h kernel: eth0: irrelevant\\n"; fi\n');
 writeFileSync(path.join(bin, 'pvesh'), '#!/usr/bin/env bash\ncase "$2" in\n */lxc) echo \'[{"vmid":109},{"vmid":112}]\' ;;\n */qemu) echo \'[]\' ;;\n */snapshot) echo \'[{"name":"current"}]\' ;;\n *) echo "pvesh $*" ;;\nesac\n');
-for (const f of ['lsblk', 'smartctl', 'zpool', 'pvesh']) chmodSync(path.join(bin, f), 0o755);
+for (const f of ['lsblk', 'smartctl', 'zpool', 'journalctl', 'pvesh']) chmodSync(path.join(bin, f), 0o755);
 const gate = path.resolve('host-setup/gate.sh');
 
 function run(command) {
@@ -66,4 +67,12 @@ test('abgelehnt: Shell-Zeichen, falsche Argumente, unbekannte Befehle', () => {
 test('Syntax beider Skripte', () => {
   execFileSync('bash', ['-n', gate]);
   execFileSync('bash', ['-n', path.resolve('host-setup/setup-host.sh')]);
+});
+
+test('kernel: nur Zeilen zu Verbindungsfehlern, keine Argumente', () => {
+  const k = run('kernel');
+  assert.equal(k.code, 0);
+  assert.match(k.out, /ata4: SATA link up 1\.5 Gbps/);
+  assert.doesNotMatch(k.out, /eth0/);
+  assert.equal(run('kernel 5').code, 64);
 });

@@ -80,6 +80,7 @@ function overviewTab(host, data, stats, tests) {
       h('td', {}, pill(d.level), d.running ? h('div', { class: 'sub' }, '⏳ Test läuft') : null), h('td', {}, d.temperature != null ? `${d.temperature} °C` : '–'), h('td', { title: HOURS_HINT }, fmtAge(d.hours)), h('td', {}, fmtCount(d.powerCycles)), h('td', {}, d.wearUsed != null ? `${d.wearUsed} %` : '–'),
       h('td', { class: 'sub' }, (m.get(d.serial) ?? ['–']).join(', ')), h('td', {}, `${fmtDate(d.lastShortOk)} / ${fmtDate(d.lastLongOk)}`))))));
   return [head, host.banner ? h('div', { class: 'banner' }, h('b', {}, `${host.label} ist erreichbar.`), host.banner.autoStart ? ` Ein fälliger Test startet automatisch${host.banner.startsInMin ? ` in ${host.banner.startsInMin} min` : ''}.` : ' Der Test startet erst nach deiner Freigabe (siehe Übersicht).') : null,
+    ...(host.linkFindings ?? []).map((f) => h('div', { class: `banner ${f.level === 'replace' ? 'bad' : 'watch'}` }, h('b', {}, f.title), h('div', {}, f.text), h('div', { class: 'sub' }, `Was tun? ${f.advice}`))),
     runningPanel(tests, data, { hostId: host.id }), h('section', { class: 'panel' }, h('h2', {}, 'ZFS-Pools'), poolRows), h('section', { class: 'panel' }, h('h2', {}, 'Platten'), diskRows)];
 }
 

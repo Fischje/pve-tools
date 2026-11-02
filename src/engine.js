@@ -1,4 +1,5 @@
 // Steuerung: fragt die Hosts ab, speichert Messwerte, wertet Testergebnisse aus und startet/bricht Tests nach Zeitplan.
+import { rateKernel } from './kernel.js';
 import { DEFAULT_SETTINGS, decide, canStartManual, advanceProgress, dayKey } from './schedule.js';
 import { rate } from './rating.js';
 import { ratePool } from './zfs.js';
@@ -71,7 +72,7 @@ export class Engine {
         const last = this.db.lastSampleTs(disk.serial);
         if (!last || now - last >= 50 * MIN) {
           const base = this.db.baseline(disk.serial, now);
-          const r = rate(disk, { baseline: base, longHintDays: this.settings(hostId).longHintDays });
+          const r = rate(disk, { baseline: base, crcBaseline: this.db.crcBaseline(disk.serial, now), longHintDays: this.settings(hostId).longHintDays });
           this.db.addSample(disk.serial, now, {
             hours: disk.hours, temp: disk.temperature, wearUsed: disk.wearUsed, reallocated: disk.ata?.reallocated, crc: disk.ata?.crc,
             reportedUncorrect: disk.ata?.reportedUncorrect, mediaErrors: disk.nvme?.mediaErrors, level: r.level,
@@ -80,8 +81,17 @@ export class Engine {
       } catch (e) { this.event(hostId, null, `${dev.device}: ${e.message}`); }
     }
     this.db.setHostState(hostId, { lastPoll: now, reachable: true, uptimeSec: uptime, uptimeAt: now, pools, error: null, gateVersion });
+    if ((gateVersion ?? 1) >= 5) {
+      try { this.db.setSetting(`kernel:${hostId}`, JSON.stringify(await client.kernelLog())); } catch (e) { this.log(`[${hostId}] Kernel-Meldungen: ${e.message}`); }
+    }
     if ((gateVersion ?? 1) >= 4) await this.pollBackups(hostId, client, now, force);
     try { await this.notifier?.evaluateHost(hostId); } catch (e) { this.log(`Benachrichtigung fehlgeschlagen: ${e.message}`); }
+  }
+
+  /** Befunde zu SATA/NVMe-Verbindungsfehlern laut Kernel-Meldungen (leer ohne Prüfskript ab Version 5). */
+  linkFindings(hostId) {
+    let k = null; try { k = JSON.parse(this.db.getSetting(`kernel:${hostId}`) ?? 'null'); } catch { /* leer */ }
+    return rateKernel(k);
   }
 
   /** Gäste, Snapshots, vzdump-Läufe und Zustand der Snapshot-Skripte lesen. Höchstens einmal pro Stunde, außer auf Knopfdruck. */

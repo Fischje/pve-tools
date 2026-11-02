@@ -21,10 +21,11 @@
 #   tasks                        letzte vzdump-Aufgaben dieses Knotens (JSON)
 #   tasklog <UPID>               Protokoll einer vzdump-Aufgabe (JSON)
 #   autosnap                     Zustand der Snapshot-Skripte (Schalter, Aufbewahrung, Cron, letzte Meldungen)
+#   kernel                       Kernel-Meldungen der letzten 48 h zu SATA/NVMe-Verbindungsfehlern (nur ausgewählte Zeilen)
 set -euo pipefail
 
 # Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
-GATE_VERSION=4
+GATE_VERSION=5
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
@@ -107,5 +108,11 @@ case "${a[0]}" in
     echo "== wrapper"; cat /usr/local/sbin/autosnap-run 2>/dev/null || true
     echo "== cron"; cat /etc/cron.d/proxmox-autosnap 2>/dev/null || true
     echo "== log"; journalctl -t autosnap -n 40 --no-pager -o short-iso 2>/dev/null || true ;;
+  kernel)
+    [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
+    # Nur Zeilen zu ATA-Bus-/Link-Fehlern und NVMe-Resets, höchstens 300. Kein Zugriff auf andere Logs.
+    { journalctl -k --since "-48 hours" --no-pager -o short-iso 2>/dev/null || true; } \
+      | { grep -E 'ata[0-9]+(\.[0-9]+)?: .*(ATA bus error|failed command|frozen|hard resetting|link up 1\.5 Gbps|link up 3\.0 Gbps|SError)|nvme[0-9]+: .*(reset|timeout|controller is down)' || true; } \
+      | tail -n 300 ;;
   *) fail "unbekannter Befehl" ;;
 esac

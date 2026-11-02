@@ -180,12 +180,12 @@ function mailPanel() {
     user: h('input', { type: 'text', value: c.user, autocomplete: 'off' }), pw: h('input', { type: 'password', autocomplete: 'new-password', placeholder: m.passwordSet ? 'gespeichert (leer lassen = unverändert)' : '' }),
     from: h('input', { type: 'text', value: c.from, placeholder: 'platten@example.org' }), to: h('input', { type: 'text', value: c.to, placeholder: 'du@example.org' }), baseUrl: h('input', { type: 'text', value: c.baseUrl, placeholder: `http://${location.host}` }),
     cert: h('input', { type: 'checkbox', checked: c.rejectUnauthorized === false }),
-    disk: h('input', { type: 'checkbox', checked: n.disk !== false }), pool: h('input', { type: 'checkbox', checked: n.pool !== false }), test: h('input', { type: 'checkbox', checked: n.test !== false }), recovery: h('input', { type: 'checkbox', checked: n.recovery !== false }),
+    disk: h('input', { type: 'checkbox', checked: n.disk !== false }), pool: h('input', { type: 'checkbox', checked: n.pool !== false }), test: h('input', { type: 'checkbox', checked: n.test !== false }), recovery: h('input', { type: 'checkbox', checked: n.recovery !== false }), link: h('input', { type: 'checkbox', checked: n.link !== false }),
   };
   const msg = h('p', { role: 'status' });
   const say = (ok, t) => { msg.className = ok ? 'okmsg' : 'error'; msg.textContent = t; };
   const body = () => ({ enabled: f.enabled.checked, host: f.host.value.trim(), port: Number(f.port.value), security: f.security.value, user: f.user.value.trim(), password: f.pw.value || undefined, from: f.from.value.trim(), to: f.to.value.trim(), baseUrl: f.baseUrl.value.trim(),
-    rejectUnauthorized: !f.cert.checked, notify: { disk: f.disk.checked, pool: f.pool.checked, test: f.test.checked, recovery: f.recovery.checked } });
+    rejectUnauthorized: !f.cert.checked, notify: { disk: f.disk.checked, pool: f.pool.checked, test: f.test.checked, recovery: f.recovery.checked, link: f.link.checked } });
   const save = async () => { await api('PUT', '/api/mail', body()); f.pw.value = ''; await load(false); };
   const run = (fn, okText) => async () => { try { await save(); await fn(); say(true, okText); } catch (e) { say(false, e.message); } };
   return h('section', { class: 'panel' }, h('h2', {}, 'E-Mail-Benachrichtigung'),
@@ -197,7 +197,7 @@ function mailPanel() {
       h('label', { class: 'f' }, 'Empfänger (mehrere mit Komma, höchstens 5)', f.to), h('label', { class: 'f' }, 'Adresse dieser Oberfläche (für den Link in der Mail, optional)', f.baseUrl)),
     h('label', {}, f.cert, ' Zertifikat des Mailservers nicht prüfen (nur bei selbstsigniertem Zertifikat im eigenen Netz)'),
     h('div', { class: 'f' }, h('span', {}, 'Wann soll eine Mail kommen?'), h('div', { class: 'checks' },
-      h('label', {}, f.disk, ' Platte wird „Bald tauschen“ oder „Kritisch“'), h('label', {}, f.pool, ' ZFS-Pool-Fehler'), h('label', {}, f.test, ' Selbsttest fehlgeschlagen'), h('label', {}, f.recovery, ' Entwarnung, wenn wieder alles in Ordnung ist'))),
+      h('label', {}, f.disk, ' Platte wird „Bald tauschen“ oder „Kritisch“'), h('label', {}, f.pool, ' ZFS-Pool-Fehler'), h('label', {}, f.test, ' Selbsttest fehlgeschlagen'), h('label', {}, f.link, ' Verbindungsfehler (Kabel, Port): CRC-Zähler steigt oder Kernel meldet SATA-Fehler'), h('label', {}, f.recovery, ' Entwarnung, wenn wieder alles in Ordnung ist'))),
     msg,
     h('div', { class: 'row' }, h('button', { class: 'primary', onclick: run(async () => {}, 'Gespeichert.') }, 'Speichern'),
       h('button', { onclick: run(() => api('POST', '/api/mail/test', {}), 'Testmail wurde gesendet. Bitte Posteingang prüfen.') }, 'Speichern und Testmail senden'),

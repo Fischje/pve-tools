@@ -78,7 +78,7 @@ export function overview(engine) {
     const stById = new Map(st.disks.map((d) => [d.serial, d]));
     const disks = db.disksOfHost(host.id).map((row) => {
       const raw = row.last_raw ? JSON.parse(row.last_raw) : null;
-      const rating = raw ? rate(raw, { baseline: db.baseline(row.serial, now), longHintDays: s.longHintDays }) : { level: 'unknown', findings: [], score: null, healthText: 'Unbekannt' };
+      const rating = raw ? rate(raw, { baseline: db.baseline(row.serial, now), crcBaseline: db.crcBaseline(row.serial, now), longHintDays: s.longHintDays }) : { level: 'unknown', findings: [], score: null, healthText: 'Unbekannt' };
       const d = stById.get(row.serial);
       const planned = nextPlanned(now, s, d);
       const prog = d.longProgress;
@@ -100,7 +100,7 @@ export function overview(engine) {
     const dec = engine.lastDecision.get(host.id);
     return {
       id: host.id, label: host.label ?? host.id, address: host.address ?? null, port: host.port ?? 22, kind: host.kind ?? 'fest', mode: s.mode, settings: s, reachable: !!hs?.reachable, error: hs?.error ?? null,
-      lastPoll: iso(hs?.lastPoll), uptimeSec: st.uptimeSec, pools,
+      lastPoll: iso(hs?.lastPoll), uptimeSec: st.uptimeSec, pools, linkFindings: engine.linkFindings(host.id),
       window: { open: win.open, reason: win.reason, softEnd: iso(win.softEnd), minutesLeft: win.minutesLeft },
       hostSummary: { reachable: !!hs?.reachable },
       gate: { version: hs?.gateVersion ?? null, expected: EXPECTED_GATE_VERSION, outdated: !!hs?.reachable && hs?.gateVersion != null && hs.gateVersion < EXPECTED_GATE_VERSION },

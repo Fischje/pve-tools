@@ -11,14 +11,18 @@ const worst = (levels) => levels.reduce((a, b) => (LEVEL_ORDER.indexOf(b) > LEVE
  * @param {{baseline?: object|null, longHintDays?: number}} opts
  *   baseline: ein älterer Messpunkt (7–90 Tage alt) mit {reallocated, crc, reportedUncorrect, mediaErrors}.
  *   Fehlt er, wird nur der absolute Wert bewertet.
+ *   crcBaseline: ältester Messpunkt der letzten 7 Tage, damit ein CRC-Anstieg schon nach einer Stunde auffällt.
  */
-export function rate(disk, { baseline = null, longHintDays = 120 } = {}) {
+export function rate(disk, { baseline = null, crcBaseline = null, longHintDays = 120 } = {}) {
   if (disk.standby) return { level: 'unknown', score: null, healthText: 'Schläft', findings: [{ level: 'info', code: 'standby', title: 'Platte schläft', text: 'Die Platte ist im Standby. Zum Abfragen wurde sie nicht geweckt.', advice: '' }], wearUsed: null, remainingLife: null };
   if (disk.unreadable) return { level: 'unknown', score: null, healthText: 'Unbekannt', findings: [{ level: 'watch', code: 'unreadable', title: 'SMART nicht lesbar', text: 'smartctl lieferte keine auswertbaren Daten.', advice: 'Prüfen, ob die Platte hinter einem RAID-/HBA-Controller hängt.' }], wearUsed: null, remainingLife: null };
 
   const f = [];
   const add = (level, code, title, text, advice = '') => f.push({ level, code, title, text, advice });
-  const rose = (cur, key) => baseline != null && baseline[key] != null && cur > baseline[key];
+  const rose = (cur, key) => {
+    if (key === 'crc' && crcBaseline?.crc != null && cur > crcBaseline.crc) return true;
+    return baseline != null && baseline[key] != null && cur > baseline[key];
+  };
 
   if (disk.smartPassed === false) add('critical', 'smart-failed', 'SMART-Gesamtstatus: FAILED', 'Die Platte meldet selbst, dass sie ausfällt.', 'Sofort Daten sichern und Platte ersetzen.');
 
@@ -58,6 +62,7 @@ function rateHdd(disk, add, rose) {
   if (disk.ataErrorCount > 0) add('watch', 'ata-errors', 'Einträge im Fehlerprotokoll', `Die Platte hat ${disk.ataErrorCount} Fehler protokolliert.`, 'Mit `smartctl -l error` ansehen.');
   if (a.crc > 0) {
     const rising = rose(a.crc, 'crc');
+    if (!rising && a.crc < 1000) add('info', 'crc-stable', 'Einzelne Übertragungsfehler (CRC)', `${a.crc} Übertragungsfehler zwischen Platte und Controller seit Beginn. Der Zähler geht nie zurück und ist allein kein Defekt.`, 'Wichtig ist nur, ob er weiter steigt. Das Tool meldet es, sobald das passiert.');
     if (rising || (a.crc >= 1000 && !rising)) add('watch', 'crc', rising ? 'Übertragungsfehler nehmen zu' : 'Viele Übertragungsfehler (CRC)', `${a.crc} Übertragungsfehler zwischen Platte und Controller${rising ? ', Tendenz steigend' : ' seit Beginn der Lebensdauer'}. Das liegt meist an Kabel, Stecker oder Backplane, nicht an der Platte.`, 'Kabel/Stecker/Backplane prüfen oder tauschen. Danach beobachten, ob der Wert noch steigt.');
   }
   if (disk.temperature >= 50) add('watch', 'temp', 'Platte ist warm', `${disk.temperature} °C. HDDs halten dauerhaft über 50 °C deutlich kürzer.`, 'Belüftung prüfen.');

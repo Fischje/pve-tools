@@ -94,6 +94,12 @@ export function openDb(dir) {
       if (!r || ms(now) - r.ts < 3 * 864e5) return null;
       return { reallocated: r.reallocated, crc: r.crc, reportedUncorrect: r.reported_uncorrect, mediaErrors: r.media_errors, ts: d(r.ts) };
     },
+    /** Ältester Messpunkt der letzten 7 Tage (mindestens 30 Minuten alt), nur für „CRC steigt“. */
+    crcBaseline(serial, now) {
+      const r = q('SELECT crc,ts FROM sample WHERE serial=? AND ts>=? AND crc IS NOT NULL ORDER BY ts ASC LIMIT 1').get(serial, ms(now) - 7 * 864e5);
+      if (!r || ms(now) - r.ts < 30 * 60e3) return null;
+      return { crc: r.crc, ts: d(r.ts) };
+    },
     history: (serial, sinceMs) => q('SELECT ts,hours,temp,wear_used,reallocated,crc,media_errors,level FROM sample WHERE serial=? AND ts>=? ORDER BY ts').all(serial, sinceMs),
     prune(now) { q('DELETE FROM sample WHERE ts<?').run(ms(now) - 800 * 864e5); q('DELETE FROM event WHERE ts<?').run(ms(now) - 365 * 864e5); },
 

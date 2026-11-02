@@ -6,7 +6,7 @@ import { sendMail, validAddress } from './smtp.js';
 
 export const MAIL_DEFAULTS = {
   enabled: false, host: '', port: 587, security: 'starttls', user: '', from: '', to: '', baseUrl: '', rejectUnauthorized: true,
-  notify: { disk: true, pool: true, test: true, recovery: true }, baselineAt: null,
+  notify: { disk: true, pool: true, test: true, recovery: true, link: true }, baselineAt: null,
 };
 const rank = (l) => LEVEL_ORDER.indexOf(l);
 const ICON = { critical: '✖', replace: '▲', watch: '!', ok: '✔', info: 'i' };
@@ -29,7 +29,7 @@ export function cleanMail(input) {
   }
   if ('baseUrl' in input) { out.baseUrl = str(input.baseUrl, 200, 'Adresse der Oberfläche'); if (out.baseUrl && !/^https?:\/\/[^\s]+$/.test(out.baseUrl)) throw new Error('Adresse der Oberfläche: muss mit http:// oder https:// beginnen'); }
   if ('rejectUnauthorized' in input) out.rejectUnauthorized = !!input.rejectUnauthorized;
-  if ('notify' in input) out.notify = { disk: !!input.notify?.disk, pool: !!input.notify?.pool, test: !!input.notify?.test, recovery: !!input.notify?.recovery };
+  if ('notify' in input) out.notify = { disk: !!input.notify?.disk, pool: !!input.notify?.pool, test: !!input.notify?.test, recovery: !!input.notify?.recovery, link: input.notify?.link !== false };
   return out;
 }
 
@@ -75,8 +75,8 @@ export class Notifier {
     const s = this.engine.settings(hostId);
     const disks = this.db.disksOfHost(hostId).filter((d) => d.last_raw).map((d) => {
       const raw = JSON.parse(d.last_raw);
-      const r = rate(raw, { baseline: this.db.baseline(d.serial, now), longHintDays: s.longHintDays });
-      return { serial: d.serial, label: `${d.model} (${d.device})`, model: d.model, device: d.device, level: r.level, findings: r.findings };
+      const r = rate(raw, { baseline: this.db.baseline(d.serial, now), crcBaseline: this.db.crcBaseline(d.serial, now), longHintDays: s.longHintDays });
+      return { crc: raw.ata?.crc ?? null, serial: d.serial, label: `${d.model} (${d.device})`, model: d.model, device: d.device, level: r.level, findings: r.findings };
     });
     const pools = (this.db.getHostState(hostId)?.pools ?? []).map((p) => ratePool(p, now));
     return { host, disks, pools };
@@ -91,7 +91,8 @@ export class Notifier {
     const now = this.engine.now();
     for (const h of this.engine.hosts) {
       const { disks, pools } = this.snapshot(h.id);
-      for (const d of disks) this.db.setAlert(`disk:${d.serial}`, d.level, d.level, now);
+      for (const d of disks) { this.db.setAlert(`disk:${d.serial}`, d.level, d.level, now); if (d.crc != null) this.db.setAlert(`crc:${d.serial}`, 'seen', `${d.crc}|0`, now); }
+      const lf = this.engine.linkFindings(h.id); if (lf.length) this.db.setAlert(`link:${h.id}`, 'seen', `${lf.map((f) => f.signature).join(',')}|0`, now);
       for (const p of pools) this.db.setAlert(`pool:${h.id}:${p.name}`, p.level, JSON.stringify(this.poolSignature(p)), now);
     }
     const c = this.config();
@@ -121,6 +122,7 @@ export class Notifier {
       } else if (rank(d.level) < rank(alerted)) next = d.level; // verbessert, aber keine Mail gewünscht
       this.db.setAlert(key, d.level, next, now);
     }
+    await this.checkLinks(hostId, hl, disks, c, now);
     for (const p of pools) {
       const key = `pool:${hostId}:${p.name}`, prev = this.db.getAlert(key);
       const was = new Set(prev ? JSON.parse(prev.alerted || '[]') : []), cur = this.poolSignature(p), curSet = new Set(cur);
@@ -136,6 +138,33 @@ export class Notifier {
         if (ok) next = '[]';
       } else if (!added.length) next = JSON.stringify(cur.filter((x) => was.has(x)));
       this.db.setAlert(key, p.level, next, now);
+    }
+  }
+
+  /**
+   * Verbindungsfehler (Kabel/Anschluss): CRC-Zähler einer Platte steigt, oder der Kernel meldet SATA/NVMe-Fehler.
+   * Höchstens eine Mail je 12 Stunden und Ursache, damit ein dauerhaft wackelndes Kabel nicht jede Stunde eine Mail auslöst.
+   */
+  async checkLinks(hostId, hl, disks, c, now) {
+    if (!c.notify.link) return;
+    const COOL = 12 * 3600e3, link = this.link(c);
+    for (const d of disks) {
+      const rising = d.findings.some((f) => f.code === 'crc' && f.title.startsWith('Übertragungsfehler nehmen zu'));
+      const key = `crc:${d.serial}`, prev = this.db.getAlert(key);
+      const [pc, pt] = String(prev?.alerted ?? '').split('|').map(Number);
+      if (!rising || d.crc == null || (prev && d.crc <= (pc || 0)) || (prev && now - pt < COOL)) continue;
+      const ok = await this.safeDeliver(`[Verbindung] ${hl}: ${d.model} – Übertragungsfehler nehmen zu`,
+        `Host: ${hl}\nPlatte: ${d.label}\nSeriennummer: ${d.serial}\nCRC-Zähler: ${d.crc}${prev && pc != null && !Number.isNaN(pc) ? ` (vorher ${pc})` : ''}\n\nDie Platte meldet mehr Übertragungsfehler zwischen Platte und Controller. Das liegt fast immer am SATA-Datenkabel, am Stecker, am Port oder an der Stromversorgung, selten an der Platte selbst.\n\nWas tun? Kabel tauschen oder neu stecken, notfalls anderen Port nehmen. Der Zähler geht nie zurück: Wichtig ist nur, ob er danach weiter steigt.\n${link}${this.foot()}`);
+      if (ok) this.db.setAlert(key, 'sent', `${d.crc}|${now.getTime()}`, now);
+    }
+    const lf = this.engine.linkFindings(hostId);
+    const key = `link:${hostId}`, prev = this.db.getAlert(key);
+    const sig = lf.map((f) => f.signature).join(',');
+    const [ps, pt] = String(prev?.alerted ?? '').split('|');
+    if (lf.length && sig !== ps && (!prev || now - Number(pt) >= COOL)) {
+      const ok = await this.safeDeliver(`[Verbindung] ${hl}: Fehler an ${lf.map((f) => f.port).join(', ')}`,
+        `Host: ${hl}\n\nDer Kernel meldet Verbindungsfehler zu Platten (letzte 48 Stunden):\n${this.findingLines(lf)}\n${link}${this.foot()}`);
+      if (ok) this.db.setAlert(key, 'sent', `${sig}|${now.getTime()}`, now);
     }
   }
 

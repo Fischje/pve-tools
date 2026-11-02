@@ -1,6 +1,7 @@
 // Spricht über einen Transport mit dem Gate-Skript des Hosts und liefert normalisierte Daten.
 import { normalize } from './smart.js';
 import { parseZpoolStatus, parseZpoolList } from './zfs.js';
+import { parseKernelLog } from './kernel.js';
 import { parseGuests, parseSnapshots, parseTasks, parseVzdumpLog, parseAutosnap } from './backups.js';
 
 export class HostClient {
@@ -53,6 +54,9 @@ export class HostClient {
   async backupTasks() { const r = await this.t.run('tasks', 60000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Aufgaben nicht lesbar'); return parseTasks(r.stdout); }
   async backupTaskLog(upid) { const r = await this.t.run(`tasklog ${upid}`, 120000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Protokoll nicht lesbar'); return parseVzdumpLog(r.stdout); }
   async autosnap() { const r = await this.t.run('autosnap', 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Snapshot-Zustand nicht lesbar'); return parseAutosnap(r.stdout); }
+
+  /** Kernel-Meldungen zu Verbindungsfehlern der letzten 48 h (braucht Prüfskript ab Version 5). */
+  async kernelLog() { const r = await this.t.run('kernel', 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Kernel-Meldungen nicht lesbar'); return parseKernelLog(r.stdout); }
 
   /** Test starten. plan: {test:'short'|'long'} oder {test:'select', from, to}. */
   async startTest(device, plan) {

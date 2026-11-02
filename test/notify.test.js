@@ -167,3 +167,33 @@ test('Einstellungen werden geprüft', () => {
   assert.throws(() => cleanMail({ baseUrl: 'javascript:alert(1)' }), /http/);
   assert.deepEqual(cleanMail({ to: 'a@b.de; c@d.de', port: '465', security: 'ssl' }), { to: 'a@b.de, c@d.de', port: 465, security: 'ssl' });
 });
+
+test('Verbindungsfehler: steigender CRC-Zähler gibt eine Mail, danach höchstens alle 12 Stunden', async () => {
+  const { engine, world, db, mails, enable, advance } = await setup();
+  enable();
+  for (const h of ['router', 'pve', 'pbs']) await engine.pollHost(h);
+  const attr199 = () => sample(world, 'pve', '/dev/sdb').ata_smart_attributes.table.find((a) => a.id === 199);
+  attr199().raw.value = 0; await engine.pollHost('pve');
+  advance(60);
+  attr199().raw.value = 51; await engine.pollHost('pve');
+  const link = () => mails.filter((m) => m.subject.startsWith('[Verbindung]'));
+  assert.equal(link().length, 1);
+  assert.match(link()[0].subject, /Übertragungsfehler nehmen zu/);
+  advance(60); attr199().raw.value = 80; await engine.pollHost('pve');
+  assert.equal(link().length, 1, 'innerhalb von 12 Stunden keine zweite Mail');
+  advance(13 * 60); attr199().raw.value = 120; await engine.pollHost('pve');
+  assert.equal(link().length, 2);
+  assert.ok(db.getAlert(`crc:ZL2M6GPD`));
+});
+
+test('Verbindungsfehler: Kernel meldet SATA-Fehler, eine Mail, Aus-Schalter wird beachtet', async () => {
+  const { engine, db, mails, enable } = await setup();
+  enable();
+  for (const h of ['router', 'pve', 'pbs']) await engine.pollHost(h);
+  db.setSetting('kernel:pve', JSON.stringify({ ports: [{ port: 'ata4', errors: 6, frozen: 1, resets: 0, slowLink: '1.5 Gbps', first: '2026-11-03T08:00:00+01:00', last: '2026-11-03T08:30:00+01:00' }], total: 7 }));
+  await engine.notifier.evaluateHost('pve'); await engine.notifier.evaluateHost('pve');
+  const m = mails.filter((x) => x.subject.startsWith('[Verbindung]'));
+  assert.equal(m.length, 1);
+  assert.match(m[0].text, /ata4/);
+  assert.match(m[0].text, /Kabel/);
+});
