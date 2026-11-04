@@ -1,6 +1,6 @@
 // Backups und Snapshots: Zustand von proxmox-autosnap, Snapshot-Stand je Gast, Backup-Läufe mit Ergebnis je Gast.
-// Diese Stufe beobachtet nur. Gesichert und gesnapshottet wird weiterhin von deinen Skripten.
-import { h, fmtDT, fmtMin, pill, ctx } from './dom.js';
+// Aufgeteilt in Unterreiter: Überblick, Backup-Lauf (Steuerung durch das Tool), Snapshots (je Host), Gäste und Backup-Läufe (je Host).
+import { h, fmtDT, fmtMin, pill, fact, ctx, ui, fold, subTabs, hostSwitch } from './dom.js';
 
 const WD = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 const RES = { ok: ['ok', 'in Ordnung'], failed: ['critical', 'fehlgeschlagen'], interrupted: ['watch', 'unterbrochen'] };
@@ -22,104 +22,129 @@ function snapCell(s, now, keep) {
   return h('span', {}, `${s.count}${keep ? ` / ${keep}` : ''}`, h('span', { class: 'sub' }, ` · neuester ${ago(new Date(s.newest).toISOString(), now)}`));
 }
 
-function hostPanel(b, host, data) {
-  const as = host.autosnap, now = b.now;
-  const head = h('div', { class: 'host-head' }, h('h2', {}, host.label), h('span', { class: 'state' }, host.reachable ? 'erreichbar' : 'nicht erreichbar'), h('span', { class: 'spacer' }));
-  if (!host.supported) {
-    const hostObj = data.hosts.find((x) => x.id === host.id);
-    return h('section', { class: 'panel' }, head, h('p', { class: 'sub' }, host.gate.version == null ? 'Noch keine Daten.' : `Das Prüfskript auf diesem Host hat Version ${host.gate.version}. Für Backups und Snapshots wird Version ${host.gate.expected} gebraucht.`),
-      host.reachable && hostObj ? h('button', { class: 'primary', onclick: () => ctx.openUpdate(hostObj) }, 'Prüfskript aktualisieren') : null);
-  }
-  const asBox = as ? h('div', { class: 'finding ' + (as.enabled ? 'ok' : 'watch') },
-    h('b', {}, `Snapshots (proxmox-autosnap): ${as.known ? (as.enabled ? 'AN' : 'AUS') : 'nicht gefunden'}`),
-    as.known ? h('div', {}, [
-      as.keep && Object.keys(as.keep).length ? `Aufbewahrung: stündlich ${as.keep.hourly ?? '?'}, wöchentlich ${as.keep.weekly ?? '?'}, monatlich ${as.keep.monthly ?? '?'}. ` : '',
-      as.pauseDay != null ? `Pause: ${WD[as.pauseDay % 7]}${as.pauseToday ? ' (heute, es werden keine Snapshots angelegt)' : ''}. ` : '', `Auswahl: Gäste mit dem Tag „${as.tag}“. `,
-      as.cron.length ? `Zeitplan: ${as.cron.map((c) => c.text).join('; ')}.` : ''].join('')) : h('div', { class: 'sub' }, 'Auf diesem Host wurde /usr/local/sbin/autosnap-run nicht gefunden.'),
-    as.log?.length ? h('details', {}, h('summary', {}, `Letzte Meldungen (${as.log.length})`), h('pre', { class: 'log' }, as.log.join('\n'))) : null) : null;
 
-  const sc = host.snapControl;
-  const LBL = { hourly: 'stündlich', weekly: 'wöchentlich', monthly: 'monatlich' };
-  const post = (body, okText) => ctx.act(() => ctx.api('POST', `/api/hosts/${host.id}/snapshots`, body), okText);
+// ---------- Bausteine je Host ----------
+function unsupported(host, data) {
   const hostObj = data.hosts.find((x) => x.id === host.id);
-  const ctlBox = !as?.known || !sc ? null : !sc.allowed
-    ? h('div', { class: 'finding info' }, h('b', {}, 'Snapshot-Auslösung durch das Tool: noch nicht freigegeben'),
-        h('div', { class: 'sub' }, 'Heute löst der Cron auf dem Host die Snapshots aus. Wenn das Tool das übernehmen soll, braucht es ein zusätzliches Recht auf diesem Host. Das gibst du mit dem root-Passwort frei (Reiter „Hosts einrichten“, „Skript aktualisieren“, Haken „Snapshots auslösen erlauben“). Das Prüfskript muss dafür Version 6 haben.'),
-        hostObj ? h('div', { class: 'actions' }, h('button', { onclick: () => ctx.openUpdate(hostObj) }, 'Recht freigeben')) : null)
-    : h('div', { class: `finding ${sc.mode === 'tool' ? 'ok' : 'info'}` },
-        h('b', {}, sc.mode === 'tool' ? 'Das Tool löst die Snapshots aus (Cron auf dem Host ist aus)' : 'Die Snapshots löst der Cron auf dem Host aus'),
-        sc.cronStillActive ? h('div', { class: 'sub bad' }, 'Achtung: Auf dem Host ist laut letzter Abfrage noch ein Cron-Eintrag aktiv, es können doppelte Snapshots entstehen. „Cron jetzt ausschalten“ versucht es erneut. Hilft das nicht, steht der Eintrag woanders (z. B. im crontab von root).') : null,
-        sc.mode === 'tool' ? h('div', { class: 'sub' }, ['hourly', 'weekly', 'monthly'].map((k) => `${LBL[k]}: zuletzt ${sc.last[k] ? `${fmtDT(sc.last[k].ts)}${sc.last[k].ok ? '' : ' (Fehler)'}` : 'noch nie durch das Tool'}, nächster ${fmtDT(sc.next[k])}`).join(' · ')) : h('div', { class: 'sub' }, 'Wenn das Tool übernimmt, wird der Cron auf dem Host ausgeschaltet (umbenannt, nicht gelöscht). Verpasste wöchentliche und monatliche Läufe holt das Tool nach, sobald der Host läuft. Aufbewahrung, Auswahl der Gäste und das Löschen alter Snapshots regelt weiter das autosnap-Skript.'),
-        Object.values(sc.last).some((x) => !x.ok) ? h('div', { class: 'sub bad' }, `Letzter Fehler: ${Object.values(sc.last).find((x) => !x.ok).text}`) : null,
-        h('div', { class: 'actions' },
-          sc.cronStillActive ? h('button', { class: 'primary', onclick: () => post({ action: 'mode', mode: 'tool' }, 'Cron ausgeschaltet.') }, 'Cron jetzt ausschalten') : null,
-          sc.mode === 'tool' ? h('button', { onclick: () => { if (confirm('Wieder den Cron auf dem Host verwenden?')) post({ action: 'mode', mode: 'cron' }, 'Cron auf dem Host ist wieder aktiv.'); } }, 'Zurück zum Cron')
-            : h('button', { class: 'primary', onclick: () => { if (confirm('Das Tool löst die Snapshots künftig aus und schaltet den Cron auf dem Host aus. Fortfahren?')) post({ action: 'mode', mode: 'tool' }, 'Das Tool löst die Snapshots jetzt aus.'); } }, 'Das Tool übernimmt'),
-          h('button', { onclick: () => post({ action: 'switch', on: !as.enabled }, as.enabled ? 'Snapshots ausgeschaltet.' : 'Snapshots eingeschaltet.') }, as.enabled ? 'Snapshots ausschalten' : 'Snapshots einschalten'),
-          h('button', { onclick: () => { if (confirm('Jetzt einen stündlichen Snapshot-Lauf auslösen?')) post({ action: 'run', label: 'hourly' }, 'Lauf ausgelöst.'); } }, 'Jetzt stündlichen Lauf auslösen')));
+  return h('section', { class: 'panel' }, h('p', {}, host.gate.version == null ? 'Von diesem Host liegen noch keine Daten vor.' : `Das Prüfskript auf ${host.label} hat Version ${host.gate.version}. Für Backups und Snapshots wird Version ${host.gate.expected} gebraucht.`),
+    host.reachable && hostObj ? h('button', { class: 'primary', onclick: () => ctx.openUpdate(hostObj) }, 'Prüfskript aktualisieren') : null);
+}
 
-  // Planung: Zeitpunkte (gelten, wenn das Tool auslöst) und Aufbewahrung/Pausentag (stehen auf dem Host im verwalteten Wrapper)
-  const planBox = !sc?.allowed || !as?.known ? null : (() => {
-    const p = sc.plan, k = as.keep ?? {};
-    const num = (v, lo, hi, w = 5) => h('input', { type: 'number', min: lo, max: hi, value: v, style: `width:${w}em` });
-    const sel = (opts, v) => h('select', {}, opts.map(([val, t]) => h('option', { value: val, selected: String(val) === String(v) }, t)));
-    const chk = (v) => h('input', { type: 'checkbox', checked: v });
-    const f = {
-      hourly: chk(p.hourly), hourlyMinute: num(p.hourlyMinute, 0, 59),
-      weekly: chk(p.weekly), weeklyDay: sel(WD.map((t, i) => [i, t]), p.weeklyDay), weeklyTime: h('input', { type: 'time', value: p.weeklyTime }),
-      monthly: chk(p.monthly), monthlyDay: num(p.monthlyDay, 1, 28), monthlyTime: h('input', { type: 'time', value: p.monthlyTime }),
-      kh: num(k.hourly ?? 8, 1, 99), kw: num(k.weekly ?? 1, 1, 52), km: num(k.monthly ?? 1, 1, 36),
-      pause: sel([['', 'kein Pausentag'], ...WD.map((t, i) => [i, t])], as.pauseDay ?? ''),
-      label: sel([['hourly', 'stündlich'], ['weekly', 'wöchentlich'], ['monthly', 'monatlich']], 'hourly'),
-    };
-    const out = h('pre', { class: 'log', hidden: true });
-    const save = () => {
-      const body = { action: 'plan', plan: { hourly: f.hourly.checked, hourlyMinute: Number(f.hourlyMinute.value), weekly: f.weekly.checked, weeklyDay: Number(f.weeklyDay.value), weeklyTime: f.weeklyTime.value,
-        monthly: f.monthly.checked, monthlyDay: Number(f.monthlyDay.value), monthlyTime: f.monthlyTime.value } };
-      if (sc.managed) Object.assign(body, { keep: { hourly: Number(f.kh.value), weekly: Number(f.kw.value), monthly: Number(f.km.value) }, pauseDay: f.pause.value === '' ? null : Number(f.pause.value) });
-      return post(body, 'Planung gespeichert.');
-    };
-    const dry = async () => { out.hidden = false; out.textContent = 'Läuft …'; try { out.textContent = (await ctx.api('POST', `/api/hosts/${host.id}/snapshots`, { action: 'dryrun', label: f.label.value })).text || '(keine Ausgabe)'; } catch (e) { out.textContent = e.message; } };
-    return h('details', { class: 'panel2' }, h('summary', {}, 'Planung ändern'),
-      h('p', { class: 'sub' }, sc.mode === 'tool' ? 'Die Zeitpunkte gelten für die Läufe, die das Tool auslöst.' : 'Achtung: Solange der Cron auf dem Host auslöst, gelten dessen Zeiten. Die Zeitpunkte hier wirken erst, wenn das Tool übernimmt. Aufbewahrung und Pausentag gelten immer.'),
-      h('div', { class: 'f' }, h('span', {}, 'Zeitpunkte'),
-        h('div', { class: 'row' }, h('label', {}, f.hourly, ' stündlich, jeweils zur Minute '), f.hourlyMinute),
-        h('div', { class: 'row' }, h('label', {}, f.weekly, ' wöchentlich, '), f.weeklyDay, ' um ', f.weeklyTime),
-        h('div', { class: 'row' }, h('label', {}, f.monthly, ' monatlich, am Tag '), f.monthlyDay, ' um ', f.monthlyTime, h('span', { class: 'sub' }, ' (fällt er auf den Pausentag, am Folgetag)'))),
-      sc.managed
-        ? h('div', { class: 'f' }, h('span', {}, 'Aufbewahrung (so viele Snapshots bleiben je Gast) und Pausentag'),
-            h('div', { class: 'row' }, 'stündlich ', f.kh, ' wöchentlich ', f.kw, ' monatlich ', f.km), h('div', { class: 'row' }, 'Pausentag ', f.pause))
-        : h('div', { class: 'finding info' }, h('div', { class: 'sub' }, 'Aufbewahrung und Pausentag stehen bei diesem Host noch fest im Wrapper. Zum Ändern: „Skript aktualisieren“ mit Haken „Snapshots auslösen erlauben“. Das installiert den verwalteten Wrapper (der alte bleibt als Sicherung erhalten, seine Werte werden übernommen).'),
-            hostObj ? h('div', { class: 'actions' }, h('button', { onclick: () => ctx.openUpdate(hostObj) }, 'Wrapper installieren')) : null),
-      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: save }, 'Speichern'), sc.managed ? [h('span', { class: 'spacer' }), 'Probelauf ohne Wirkung: ', f.label, h('button', { onclick: dry }, 'Probelauf')] : null), out);
-  })();
-
+function runBoxes(host, now) {
   const run = host.runningJob;
-  const runBox = run ? h('div', { class: 'finding ok' }, h('b', {}, `Ein Backup-Lauf läuft gerade (gestartet ${fmtDT(run.start)}, ${ago(run.start, now)}).`), h('div', { class: 'sub' }, 'Die Ergebnisse dieses Laufs erscheinen hier, sobald er beendet ist. Die roten Hinweise unten stammen aus dem davor beendeten Lauf.')) : null;
+  const runBox = run ? h('div', { class: 'finding ok' }, h('b', {}, `Ein Backup-Lauf läuft gerade (gestartet ${fmtDT(run.start)}, ${ago(run.start, now)}).`), h('div', { class: 'sub' }, 'Die Ergebnisse erscheinen, sobald er beendet ist. Rote Hinweise stammen aus dem davor beendeten Lauf.')) : null;
   const lr = host.lastRun;
   const lrBox = lr && lr.summary.failed > 0 ? h('div', { class: 'finding critical' },
     h('b', {}, `Der letzte beendete Backup-Lauf (${fmtDT(lr.start)}, ${lr.minutes != null ? fmtMin(lr.minutes) : '–'}) hat ${lr.summary.failed} von ${lr.summary.total} Gästen nicht gesichert.`),
     lr.summary.cause === 'verbindung'
-      ? h('div', {}, 'Ursache laut Protokoll: Die Verbindung zum PBS fehlte oder brach ab („connect“, „broken pipe“). Das passiert, wenn der PBS aus ist oder während des Laufs heruntergefahren wird. ',
-        lr.minutes != null && lr.summary.total > 0 && lr.minutes < lr.summary.total * 0.5 ? `Der Lauf dauerte nur ${fmtMin(lr.minutes)} für ${lr.summary.total} Gäste, das ist auffällig kurz. ` : '', 'Prüfe, wann der PBS in dieser Zeit an- und ausgegangen ist.')
-      : h('div', {}, 'Die Gründe stehen unten bei den einzelnen Gästen und im Protokoll des Laufs.')) : null;
+      ? h('div', {}, 'Ursache laut Protokoll: Die Verbindung zum PBS fehlte oder brach ab („connect“, „broken pipe“). Das passiert, wenn der PBS aus ist, während des Laufs ausgeht oder der Datenträger dort Probleme hat. ',
+        lr.minutes != null && lr.summary.total > 0 && lr.minutes < lr.summary.total * 0.5 ? `Der Lauf dauerte nur ${fmtMin(lr.minutes)} für ${lr.summary.total} Gäste, das ist auffällig kurz.` : '')
+      : h('div', {}, 'Die Gründe stehen im Reiter „Backup-Läufe“ beim Lauf.')) : null;
+  return [runBox, lrBox];
+}
 
-  const keep = as?.keep ?? {};
+function autosnapBox(host) {
+  const as = host.autosnap;
+  if (!as) return null;
+  return h('div', { class: 'finding ' + (as.enabled ? 'ok' : 'watch') },
+    h('b', {}, `Snapshots: ${as.known ? (as.enabled ? 'eingeschaltet' : 'AUSGESCHALTET') : 'autosnap-run nicht gefunden'}`),
+    as.known ? h('div', {}, [
+      as.keep && Object.keys(as.keep).length ? `Aufbewahrung: stündlich ${as.keep.hourly ?? '?'}, wöchentlich ${as.keep.weekly ?? '?'}, monatlich ${as.keep.monthly ?? '?'}. ` : '',
+      as.pauseDay != null ? `Pausentag: ${WD[as.pauseDay % 7]}${as.pauseToday ? ' (heute, es werden keine Snapshots angelegt)' : ''}. ` : 'Kein Pausentag. ', `Auswahl: Gäste mit dem Tag „${as.tag}“${as.onlyRunning ? ', nur laufende' : ''}. `,
+      as.cron.length ? `Zeitplan des Crons: ${as.cron.map((c) => c.text).join('; ')}.` : ''].join('')) : h('div', { class: 'sub' }, 'Auf diesem Host wurde /usr/local/sbin/autosnap-run nicht gefunden.'));
+}
+
+function snapControlBox(host, data) {
+  const as = host.autosnap, sc = host.snapControl;
+  if (!as?.known || !sc) return null;
+  const LBL = { hourly: 'Stündlich', weekly: 'Wöchentlich', monthly: 'Monatlich' };
+  const post = (body, okText) => ctx.act(() => ctx.api('POST', `/api/hosts/${host.id}/snapshots`, body), okText);
+  const hostObj = data.hosts.find((x) => x.id === host.id);
+  if (!sc.allowed) return h('div', { class: 'finding info' }, h('b', {}, 'Auslösen durch das Tool: noch nicht freigegeben'),
+    h('div', { class: 'sub' }, 'Heute löst der Cron auf dem Host die Snapshots aus. Soll das Tool das übernehmen, gib im Reiter „Hosts einrichten“ bei „Skript aktualisieren“ das Recht „Snapshots auslösen“ frei (mit dem root-Passwort).'),
+    hostObj ? h('div', { class: 'actions' }, h('button', { onclick: () => ctx.openUpdate(hostObj) }, 'Recht freigeben')) : null);
+  const failed = Object.values(sc.last).find((x) => !x.ok);
+  return h('div', { class: `finding ${sc.mode === 'tool' ? 'ok' : 'info'}` },
+    h('b', {}, sc.mode === 'tool' ? 'Das Tool löst die Snapshots aus (der Cron auf dem Host ist aus)' : 'Die Snapshots löst der Cron auf dem Host aus'),
+    sc.cronStillActive ? h('div', { class: 'sub bad' }, 'Achtung: Laut letzter Abfrage ist auf dem Host noch ein Cron-Eintrag aktiv, es können doppelte Snapshots entstehen.') : null,
+    sc.mode === 'tool'
+      ? h('table', { class: 'mini' }, h('tbody', {}, ['hourly', 'weekly', 'monthly'].filter((k) => sc.plan[k]).map((k) => h('tr', {}, h('td', {}, LBL[k]),
+          h('td', {}, `zuletzt ${sc.last[k] ? `${fmtDT(sc.last[k].ts)}${sc.last[k].ok ? '' : ' (Fehler)'}` : '– (noch nicht durch das Tool)'}`), h('td', {}, `nächster ${fmtDT(sc.next[k])}`)))))
+      : h('div', { class: 'sub' }, 'Übernimmt das Tool, wird der Cron auf dem Host ausgeschaltet (umbenannt, nicht gelöscht). Verpasste wöchentliche und monatliche Läufe holt das Tool nach, sobald der Host läuft.'),
+    failed ? h('div', { class: 'sub bad' }, `Letzter Fehler: ${failed.text}`) : null,
+    h('div', { class: 'actions' },
+      sc.cronStillActive ? h('button', { class: 'primary', onclick: () => post({ action: 'mode', mode: 'tool' }, 'Cron ausgeschaltet.') }, 'Cron jetzt ausschalten') : null,
+      sc.mode === 'tool' ? h('button', { onclick: () => { if (confirm('Wieder den Cron auf dem Host verwenden?')) post({ action: 'mode', mode: 'cron' }, 'Cron auf dem Host ist wieder aktiv.'); } }, 'Zurück zum Cron')
+        : h('button', { class: 'primary', onclick: () => { if (confirm('Das Tool löst die Snapshots künftig aus und schaltet den Cron auf dem Host aus. Fortfahren?')) post({ action: 'mode', mode: 'tool' }, 'Das Tool löst die Snapshots jetzt aus.'); } }, 'Das Tool übernimmt'),
+      h('button', { onclick: () => post({ action: 'switch', on: !as.enabled }, as.enabled ? 'Snapshots ausgeschaltet.' : 'Snapshots eingeschaltet.') }, as.enabled ? 'Snapshots ausschalten' : 'Snapshots einschalten'),
+      h('button', { onclick: () => { if (confirm('Jetzt einen stündlichen Snapshot-Lauf auslösen?')) post({ action: 'run', label: 'hourly' }, 'Lauf ausgelöst.'); } }, 'Jetzt stündlichen Lauf auslösen')));
+}
+
+/** Planung: Zeitpunkte (gelten, wenn das Tool auslöst) und Aufbewahrung/Pausentag (stehen auf dem Host im verwalteten Wrapper). */
+function planCard(host, data) {
+  const as = host.autosnap, sc = host.snapControl;
+  if (!sc?.allowed || !as?.known) return null;
+  const post = (body, okText) => ctx.act(() => ctx.api('POST', `/api/hosts/${host.id}/snapshots`, body), okText);
+  const hostObj = data.hosts.find((x) => x.id === host.id);
+  const p = sc.plan, k = as.keep ?? {};
+  const num = (v, lo, hi, w = 5) => h('input', { type: 'number', min: lo, max: hi, value: v, style: `width:${w}em` });
+  const sel = (opts, v) => h('select', {}, opts.map(([val, t]) => h('option', { value: val, selected: String(val) === String(v) }, t)));
+  const chk = (v) => h('input', { type: 'checkbox', checked: v });
+  const f = {
+    hourly: chk(p.hourly), hourlyMinute: num(p.hourlyMinute, 0, 59),
+    weekly: chk(p.weekly), weeklyDay: sel(WD.map((t, i) => [i, t]), p.weeklyDay), weeklyTime: h('input', { type: 'time', value: p.weeklyTime }),
+    monthly: chk(p.monthly), monthlyDay: num(p.monthlyDay, 1, 28), monthlyTime: h('input', { type: 'time', value: p.monthlyTime }),
+    kh: num(k.hourly ?? 8, 1, 99), kw: num(k.weekly ?? 1, 1, 52), km: num(k.monthly ?? 1, 1, 36),
+    pause: sel([['', 'kein Pausentag'], ...WD.map((t, i) => [i, t])], as.pauseDay ?? ''),
+    label: sel([['hourly', 'stündlich'], ['weekly', 'wöchentlich'], ['monthly', 'monatlich']], 'hourly'),
+  };
+  const out = h('pre', { class: 'log', hidden: true });
+  const save = () => {
+    const body = { action: 'plan', plan: { hourly: f.hourly.checked, hourlyMinute: Number(f.hourlyMinute.value), weekly: f.weekly.checked, weeklyDay: Number(f.weeklyDay.value), weeklyTime: f.weeklyTime.value,
+      monthly: f.monthly.checked, monthlyDay: Number(f.monthlyDay.value), monthlyTime: f.monthlyTime.value } };
+    if (sc.managed) Object.assign(body, { keep: { hourly: Number(f.kh.value), weekly: Number(f.kw.value), monthly: Number(f.km.value) }, pauseDay: f.pause.value === '' ? null : Number(f.pause.value) });
+    return post(body, 'Planung gespeichert.');
+  };
+  const dry = async () => { out.hidden = false; out.textContent = 'Läuft …'; try { out.textContent = (await ctx.api('POST', `/api/hosts/${host.id}/snapshots`, { action: 'dryrun', label: f.label.value })).text || '(keine Ausgabe)'; } catch (e) { out.textContent = e.message; } };
+  return h('section', { class: 'panel' }, h('h2', {}, 'Planung'),
+    h('div', { class: 'form-sec' }, h('h3', {}, 'Wann?'),
+      h('p', { class: 'sub' }, sc.mode === 'tool' ? 'Gilt für die Läufe, die das Tool auslöst.' : 'Wirkt erst, wenn das Tool übernimmt. Solange der Cron auslöst, gelten dessen Zeiten.'),
+      h('div', { class: 'row' }, h('label', {}, f.hourly, ' stündlich, jeweils zur Minute '), f.hourlyMinute),
+      h('div', { class: 'row' }, h('label', {}, f.weekly, ' wöchentlich, am '), f.weeklyDay, ' um ', f.weeklyTime),
+      h('div', { class: 'row' }, h('label', {}, f.monthly, ' monatlich, am Tag '), f.monthlyDay, ' um ', f.monthlyTime, h('span', { class: 'sub' }, ' (fällt er auf den Pausentag, am Folgetag)'))),
+    h('div', { class: 'form-sec' }, h('h3', {}, 'Wie viele bleiben? (je Gast)'),
+      sc.managed
+        ? [h('div', { class: 'row' }, h('label', { class: 'f inline' }, 'stündlich', f.kh), h('label', { class: 'f inline' }, 'wöchentlich', f.kw), h('label', { class: 'f inline' }, 'monatlich', f.km)),
+          h('div', { class: 'row' }, h('label', { class: 'f inline' }, 'Pausentag (keine Snapshots)', f.pause))]
+        : h('div', { class: 'finding info' }, h('div', { class: 'sub' }, 'Aufbewahrung und Pausentag stehen bei diesem Host noch fest im alten Wrapper. „Skript aktualisieren“ mit dem Recht „Snapshots auslösen“ installiert den verwalteten Wrapper (der alte bleibt als Sicherung, seine Werte werden übernommen).'),
+            hostObj ? h('div', { class: 'actions' }, h('button', { onclick: () => ctx.openUpdate(hostObj) }, 'Wrapper installieren')) : null)),
+    h('div', { class: 'form-sec' }, h('div', { class: 'row' }, h('button', { class: 'primary', onclick: save }, 'Planung speichern'),
+      sc.managed ? [h('span', { class: 'spacer' }), h('span', { class: 'sub' }, 'Probelauf ohne Wirkung:'), h('span', { class: 'no-dirty' }, f.label), h('button', { onclick: dry }, 'Probelauf')] : null), out));
+}
+
+function guestsTable(host, now) {
+  const as = host.autosnap, keep = as?.keep ?? {};
+  if (!host.guests.length) return h('p', { class: 'sub' }, 'Keine Gäste gelesen.');
   const rows = [...host.guests].sort((a, c) => ['replace', 'watch', 'info', 'ok'].indexOf(a.level) - ['replace', 'watch', 'info', 'ok'].indexOf(c.level) || a.vmid - c.vmid).map((g) => h('tr', {},
     h('td', {}, g.vmid), h('td', {}, h('div', { class: 'model' }, g.name), h('div', { class: 'sub' }, `${g.type === 'lxc' ? 'LXC' : 'VM'} · ${g.status === 'running' ? 'läuft' : g.status === 'stopped' ? 'gestoppt' : g.status}`)),
     h('td', {}, g.tagged ? [h('div', {}, 'Std. ', snapCell(g.snapshots.hourly, now, keep.hourly)), h('div', {}, 'Woche ', snapCell(g.snapshots.weekly, now, keep.weekly)), h('div', {}, 'Monat ', snapCell(g.snapshots.monthly, now, keep.monthly))] : h('span', { class: 'sub' }, 'kein Snapshot-Tag')),
     h('td', {}, g.backup ? h('div', {}, resultPill(g.backup.result), h('div', { class: 'sub' }, `${ago(g.backup.at, now)}${g.backup.seconds ? ` · ${fmtMin(Math.max(1, Math.round(g.backup.seconds / 60)))}` : ''}`)) : h('span', { class: 'sub' }, '–')),
     h('td', {}, g.findings.length ? g.findings.map((f) => h('div', { class: `sub ${f.level === 'replace' ? 'bad' : ''}` }, f.text)) : h('span', { class: 'okmsg' }, '✔'))));
+  return h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['ID', 'Gast', 'Snapshots (vorhanden / vorgesehen)', 'Letztes Backup', 'Hinweise'].map((t) => h('th', {}, t)))), h('tbody', {}, rows)));
+}
 
-  const runs = host.tasks.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Start', 'Dauer', 'Ergebnis', 'Gäste', 'Einzelheiten'].map((t) => h('th', {}, t)))),
-    h('tbody', {}, host.tasks.map((t) => h('tr', {}, h('td', {}, fmtDT(t.start)), h('td', {}, t.minutes != null ? fmtMin(t.minutes) : (t.running ? 'läuft' : '–')),
-      h('td', {}, t.status ? h('span', { class: `pill ${t.status === 'OK' ? 'ok' : /warn/i.test(t.status) ? 'watch' : 'critical'}` }, t.status === 'OK' ? 'in Ordnung' : t.status) : h('span', { class: 'pill unknown' }, 'läuft')),
-      h('td', {}, t.parsed ? [`${t.ok} gesichert${t.failed ? `, ${t.failed} fehlgeschlagen` : ''}${t.interrupted ? `, ${t.interrupted} unterbrochen` : ''}`, t.summary.cause === 'verbindung' ? h('div', { class: 'sub bad' }, 'Verbindung zum PBS') : null] : h('span', { class: 'sub' }, t.running ? 'läuft …' : 'Protokoll wird gelesen …')),
-      h('td', {}, t.guests.length ? h('details', {}, h('summary', {}, `${t.guests.length} Gäste`), h('ul', { class: 'plain' }, t.guests.map((x) => h('li', {}, resultPill(x.result), ` ${x.vmid} ${x.name ?? ''}`, x.seconds ? h('span', { class: 'sub' }, ` · ${fmtMin(Math.max(1, Math.round(x.seconds / 60)))}`) : '', x.note ? h('div', { class: 'sub bad' }, x.note) : null, x.detail ? h('details', {}, h('summary', {}, 'Protokollzeilen'), h('pre', { class: 'log' }, x.detail.replace(/ \| /g, '\n'))) : null)))) : '')))))) : h('p', { class: 'sub' }, 'Noch keine Backup-Läufe auf diesem Host gelesen. Die Aufgabenliste von Proxmox reicht einige Wochen zurück.');
-
-  return h('section', { class: 'panel' }, head, runBox, lrBox, asBox, ctlBox, planBox,
-    h('h3', {}, `Gäste (${host.guests.length})`), host.guests.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['ID', 'Gast', 'Snapshots (vorhanden / vorgesehen)', 'Letztes Backup', 'Hinweise'].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Keine Gäste gelesen.'),
-    h('h3', {}, 'Backup-Läufe'), runs);
+function runsList(host) {
+  if (!host.tasks.length) return h('p', { class: 'sub' }, 'Noch keine Backup-Läufe auf diesem Host gelesen. Die Aufgabenliste von Proxmox reicht einige Wochen zurück.');
+  return host.tasks.map((t) => {
+    const okRun = t.status === 'OK' && !t.failed;
+    const status = t.status ? h('span', { class: `pill ${t.status === 'OK' ? 'ok' : /warn/i.test(t.status) ? 'watch' : 'critical'}` }, t.status === 'OK' ? 'in Ordnung' : t.status) : h('span', { class: 'pill unknown' }, 'läuft');
+    const sum = t.parsed ? `${t.ok} gesichert${t.failed ? `, ${t.failed} fehlgeschlagen` : ''}${t.interrupted ? `, ${t.interrupted} unterbrochen` : ''} · ${t.minutes != null ? fmtMin(t.minutes) : 'läuft'}` : (t.running ? 'läuft …' : 'Protokoll wird gelesen …');
+    return fold(`run-${t.upid}`, h('span', {}, `${fmtDT(t.start)} `, status), sum, () => [
+      t.summary?.cause === 'verbindung' ? h('div', { class: 'finding critical' }, 'Die Verbindung zum PBS fehlte oder brach ab.') : null,
+      t.guests.length ? h('ul', { class: 'plain' }, t.guests.map((x) => h('li', {}, resultPill(x.result), ` ${x.vmid} ${x.name ?? ''}`, x.seconds ? h('span', { class: 'sub' }, ` · ${fmtMin(Math.max(1, Math.round(x.seconds / 60)))}`) : '',
+        x.note ? h('div', { class: 'sub bad' }, x.note) : null, x.detail ? h('pre', { class: 'log' }, x.detail.replace(/ \| /g, '\n')) : null))) : h('p', { class: 'sub' }, 'Keine Gäste im Protokoll.')],
+    { level: okRun ? '' : t.status ? 'critical' : '' });
+  });
 }
 
 const JOB_STATE = { wartet: ['unknown', 'wartet'], läuft: ['watch', 'läuft'], ok: ['ok', 'in Ordnung'], fehler: ['critical', 'nicht erfolgreich'], fehlt: ['critical', 'nicht erreicht'], übersprungen: ['unknown', 'übersprungen'] };
@@ -136,73 +161,154 @@ function jobBox(job, title, now) {
     job.phase !== 'läuft' && job.shutdown ? h('div', { class: 'sub' }, SHUTDOWN[job.shutdown] ?? '') : null);
 }
 
-function controlPanel(b, data) {
-  const c = b.control; if (!c) return null;
+
+const hostLevelOf = (host) => (!host.supported ? 'unknown' : host.lastRun?.summary?.failed ? 'critical' : host.guests.some((g) => g.level === 'replace') ? 'replace' : host.guests.some((g) => g.level === 'watch') ? 'watch' : 'ok');
+
+function overviewTab(b, data) {
+  const k = b.kpi, last = b.lastRun, now = b.now;
+  const kpis = h('div', { class: 'kpis' },
+    kpi('Letzter Backup-Lauf', last ? ago(last.start, now) : '–', last ? `${last.hostLabel}: ${last.status === 'OK' ? 'in Ordnung' : last.status ?? 'läuft'}` : 'noch keiner gelesen', last && last.status !== 'OK' && last.status ? 'bad' : last ? 'ok' : ''),
+    kpi('Backup-Läufe (30 Tage)', k.runs30, 'auf allen Hosts'), kpi('Fehlgeschlagene Backups', k.failedBackups, k.failedBackups ? (k.failedCause === 'verbindung' ? 'meist: Verbindung zum PBS' : 'beim letzten Lauf des Gastes') : 'keine', k.failedBackups ? 'bad' : 'ok'),
+    kpi('Snapshots', k.snapshotsOff ? `${k.snapshotsOn} an, ${k.snapshotsOff} aus` : `${k.snapshotsOn} Hosts an`, 'Schalter von autosnap', k.snapshotsOff ? 'watch' : 'ok'),
+    kpi('Gäste mit Hinweis', k.problems, `von ${k.guests} Gästen`, k.problems ? 'watch' : 'ok'));
+  const c = b.control;
+  const goTab = (tab, hostId) => { ui.tabs.bk = tab; if (hostId) { ui.tabs['bk-host'] = hostId; } ctx.render(); window.scrollTo(0, 0); };
+  const cards = b.hosts.filter((x) => x.supported || x.gate.version != null).map((host) => {
+    const sc = host.snapControl, as = host.autosnap, bad = host.guests.filter((g) => g.level === 'replace' || g.level === 'watch').length;
+    return h('article', { class: `card ${hostLevelOf(host)}` },
+      h('div', { class: 'card-head' }, h('div', { class: 'model' }, host.label), h('span', { class: 'sub' }, host.reachable ? 'erreichbar' : 'nicht erreichbar')),
+      !host.supported ? h('p', { class: 'sub' }, `Prüfskript zu alt (Version ${host.gate.version}).`) : [
+        runBoxes(host, now),
+        h('div', { class: 'facts' },
+          fact('Letzter Lauf', host.lastRun ? `${fmtDT(host.lastRun.start)}` : '–'),
+          fact('Ergebnis', host.lastRun ? (host.lastRun.summary.failed ? `${host.lastRun.summary.failed} von ${host.lastRun.summary.total} fehlgeschlagen` : `${host.lastRun.summary.total} gesichert`) : '–'),
+          fact('Snapshots', as?.known ? (as.enabled ? (sc?.mode === 'tool' ? 'an, vom Tool' : 'an, per Cron') : 'AUS') : '–'),
+          fact('Gäste', `${host.guests.length}${bad ? `, ${bad} mit Hinweis` : ''}`)),
+        h('div', { class: 'row' }, h('button', { onclick: () => goTab('gaeste', host.id) }, 'Gäste'), h('button', { onclick: () => goTab('laeufe', host.id) }, 'Backup-Läufe'), as?.known ? h('button', { onclick: () => goTab('snapshots', host.id) }, 'Snapshots') : null)]);
+  });
+  return [kpis,
+    c ? h('section', { class: 'panel' }, h('div', { class: 'card-title' }, h('h2', {}, 'Backup-Lauf'), h('span', { class: `pill ${c.settings.mode === 'steuern' ? 'ok' : 'unknown'}` }, c.settings.mode === 'steuern' ? 'Das Tool steuert' : 'Das Tool beobachtet nur'), h('span', { class: 'spacer' }), h('button', { onclick: () => goTab('lauf') }, 'Öffnen')),
+      jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', now) ?? jobBox(c.last, 'Letzter Lauf des Tools', now) ?? h('p', { class: 'sub' }, 'Das Tool hat noch keinen Backup-Lauf gesteuert.')) : null,
+    h('div', { class: 'grid' }, cards)];
+}
+
+function laufTab(b) {
+  const c = b.control; if (!c) return h('p', { class: 'empty' }, 'Keine Daten.');
   const s = c.settings, act = (body, okText) => ctx.act(() => ctx.api('POST', '/api/backups/control', body), okText);
   const field = (type, v, extra = {}) => h('input', { type, value: v, ...extra });
   const f = { pbs: h('select', {}, c.hostChoices.map((x) => h('option', { value: x.id, selected: x.id === s.pbsHostId }, x.label))), storage: field('text', s.storage, { size: 10 }),
-    wait: field('number', s.waitAfterBootMin, { min: 0, max: 240, style: 'width:5em' }), hostWait: field('number', s.hostWaitMin, { min: 1, max: 240, style: 'width:5em' }),
+    wait: field('number', s.waitAfterBootMin, { min: 0, max: 240, style: 'width:6em' }), hostWait: field('number', s.hostWaitMin, { min: 1, max: 240, style: 'width:6em' }),
     shutdown: h('input', { type: 'checkbox', checked: s.shutdown }) };
   // Gäste je Host: Haken = wird gesichert. Gespeichert wird die Ausschlussliste, damit neue Gäste automatisch mitgesichert werden (wie --all).
   const picks = new Map(c.hosts.map((x) => [x.id, {
     enabled: h('input', { type: 'checkbox', checked: x.enabled }),
-    boxes: x.guests.sort((p, q) => p.vmid - q.vmid).map((g) => ({ g, box: h('input', { type: 'checkbox', checked: x.select === 'all' ? true : x.select === 'exclude' ? !x.ids.includes(g.vmid) : x.ids.includes(g.vmid) }) })),
+    boxes: [...x.guests].sort((p, q) => p.vmid - q.vmid).map((g) => ({ g, box: h('input', { type: 'checkbox', checked: x.select === 'all' ? true : x.select === 'exclude' ? !x.ids.includes(g.vmid) : x.ids.includes(g.vmid) }) })),
     unknown: x.select === 'exclude' ? x.ids.filter((id) => !x.guests.some((g) => g.vmid === id)) : [],
   }]));
   const collect = () => ({
     storage: f.storage.value.trim(), pbsHostId: f.pbs.value, waitAfterBootMin: Number(f.wait.value), hostWaitMin: Number(f.hostWait.value), shutdown: f.shutdown.checked,
     hosts: Object.fromEntries(c.hosts.map((x) => { const p = picks.get(x.id); const off = [...p.boxes.filter((y) => !y.box.checked).map((y) => y.g.vmid), ...p.unknown]; return [x.id, { enabled: p.enabled.checked, select: 'exclude', ids: off }]; })),
   });
-  const out = h('div', { hidden: true });
+  const out = h('div', {});
   const dry = async () => {
-    out.hidden = false; out.replaceChildren(h('p', { class: 'sub' }, 'Prüfe …'));
+    out.replaceChildren(h('p', { class: 'sub' }, 'Prüfe …'));
     try {
       await ctx.api('POST', '/api/backups/control', { action: 'settings', settings: collect() });
       const { plan } = await ctx.api('POST', '/api/backups/control', { action: 'dryrun' });
-      out.replaceChildren(h('div', { class: 'finding info' }, h('b', {}, `Trockenlauf: so würde gesichert (Speicher „${plan.storage}“)`),
-        plan.problems.length ? h('ul', { class: 'plain bad' }, plan.problems.map((p) => h('li', {}, `✖ ${p}`))) : h('div', { class: 'sub' }, '✔ Keine Probleme gefunden.'),
-        plan.hosts.map((x) => h('details', {}, h('summary', {}, `${x.label}: ${x.enabled ? `${x.guests.length} Gäste${x.excluded ? `, ${x.excluded} ausgenommen` : ''}` : 'ausgeschaltet'}${x.reachable ? '' : ' (nicht erreichbar)'}`),
-          h('div', { class: 'sub' }, h('code', {}, x.command)), h('div', {}, x.guests.map((g) => `${g.vmid} ${g.name}`).join(', ') || '–'))),
-        h('div', { class: 'sub' }, plan.shutdown ? 'Nach vollständigem Erfolg wird der PBS heruntergefahren.' : 'Der PBS bleibt nach dem Lauf an.')));
-    } catch (e) { out.replaceChildren(h('p', { class: 'error' }, e.message)); }
+      out.replaceChildren(h('section', { class: 'panel' }, h('h2', {}, `Trockenlauf: so würde gesichert (Speicher „${plan.storage}“)`),
+        plan.problems.length ? h('div', { class: 'finding critical' }, h('ul', { class: 'plain' }, plan.problems.map((p) => h('li', {}, p)))) : h('div', { class: 'finding ok' }, 'Keine Probleme gefunden.'),
+        plan.hosts.map((x) => h('div', { class: 'form-sec' }, h('h3', {}, `${x.label}: ${x.enabled ? `${x.guests.length} Gäste${x.excluded ? `, ${x.excluded} ausgenommen` : ''}` : 'ausgeschaltet'}${x.reachable ? '' : ' (gerade nicht erreichbar)'}`),
+          h('div', { class: 'sub' }, h('code', {}, x.command)), h('p', {}, x.guests.map((g) => `${g.vmid} ${g.name}`).join(', ') || '–'))),
+        h('p', { class: 'sub' }, plan.shutdown ? 'Nach vollständigem Erfolg wird der PBS heruntergefahren.' : 'Der PBS bleibt nach dem Lauf an.')));
+    } catch (e) { out.replaceChildren(h('div', { class: 'banner warn' }, e.message)); }
   };
   const save = () => act({ action: 'settings', settings: collect() }, 'Einstellungen gespeichert.');
   const steuern = s.mode === 'steuern';
-  const hostBlocks = c.hosts.map((x) => { const p = picks.get(x.id); return h('details', {}, h('summary', {}, h('label', {}, p.enabled, ` ${x.label}`), h('span', { class: 'sub' }, ` – ${p.boxes.filter((y) => y.box.checked).length} von ${p.boxes.length} Gästen werden gesichert${x.right ? '' : ' · Recht „Backups starten“ fehlt'}`)),
-    h('div', { class: 'checks' }, p.boxes.map(({ g, box }) => h('label', { class: g.status === 'running' ? '' : 'sub' }, box, ` ${g.vmid} ${g.name}${g.status === 'running' ? '' : ' (aus)'}`)))); });
-  return h('section', { class: 'panel' }, h('h2', {}, 'Backup-Lauf'),
+
+  const status = h('section', { class: 'panel' }, h('h2', {}, 'Status'),
     h('div', { class: `finding ${steuern ? 'ok' : 'info'}` },
       h('b', {}, steuern ? 'Das Tool steuert die Backup-Läufe' : 'Das Tool beobachtet nur (der bisherige Orchestrator auf dem PBS läuft)'),
-      h('div', { class: 'sub' }, steuern ? `Nach dem Hochfahren des PBS (${c.pbs.label}) wartet das Tool ${s.waitAfterBootMin} min und sichert dann host für host. Der PBS wird nur nach vollständigem Erfolg heruntergefahren${s.shutdown ? '' : ' (ausgeschaltet: er bleibt immer an)'}. Den alten Orchestrator bitte auf dem PBS abschalten (Cron @reboot), sonst laufen zwei Steuerungen.` : 'Zuerst Einstellungen und Trockenlauf prüfen. Dann die Betriebsart auf „Das Tool steuert“ stellen und auf dem PBS den alten Orchestrator abschalten (Cron @reboot auskommentieren).'),
+      h('div', { class: 'sub' }, steuern ? `Nach dem Hochfahren des PBS (${c.pbs.label}) wartet das Tool ${s.waitAfterBootMin} min und sichert dann Host für Host. Der PBS wird nur nach vollständigem Erfolg heruntergefahren${s.shutdown ? '' : ' (ausgeschaltet: er bleibt immer an)'}.` : 'Zuerst Einstellungen und Trockenlauf prüfen. Dann auf „Das Tool steuert“ umstellen und auf dem PBS den alten Orchestrator abschalten (Cron @reboot auskommentieren).'),
       h('div', { class: 'actions' },
         steuern ? h('button', { onclick: () => act({ action: 'settings', settings: { mode: 'beobachten' } }, 'Das Tool beobachtet nur.') }, 'Zurück auf „nur beobachten“')
           : h('button', { class: 'primary', onclick: () => { if (confirm('Das Tool steuert ab jetzt die Backups. Hast du den alten Orchestrator auf dem PBS abgeschaltet?')) act({ action: 'settings', settings: { mode: 'steuern' } }, 'Das Tool steuert die Backups.'); } }, 'Das Tool steuert'),
         h('button', { onclick: () => { if (confirm('Jetzt einen Backup-Lauf starten? Der PBS muss laufen.')) act({ action: 'start' }, 'Backup-Lauf gestartet.'); } }, 'Jetzt Backup starten'),
-        b.control.job?.phase === 'läuft' ? h('button', { onclick: () => act({ action: 'abort' }, 'Im Tool abgebrochen.') }, 'Im Tool abbrechen') : null)),
-    jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', b.now), jobBox(c.job?.phase === 'läuft' ? c.last : (c.job ?? c.last), 'Letzter Lauf des Tools', b.now),
-    h('details', {}, h('summary', {}, 'Einstellungen und Auswahl der Gäste'),
-      h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'PBS-Host (wird heruntergefahren)', f.pbs), h('label', { class: 'f' }, 'Speicher auf den Hosts', f.storage),
-        h('label', { class: 'f' }, 'Wartezeit nach dem Hochfahren (Minuten)', f.wait), h('label', { class: 'f' }, 'Höchstens so lange auf einen Host/Speicher warten (Minuten)', f.hostWait)),
-      h('label', {}, f.shutdown, ' PBS nach vollständigem Erfolg herunterfahren'),
-      !c.pbs.rightShutdown ? h('p', { class: 'sub bad' }, `Auf ${c.pbs.label} ist das Recht „Herunterfahren“ nicht freigegeben (Reiter Hosts einrichten).`) : null,
-      h('h3', {}, 'Was wird gesichert? (Reihenfolge von oben nach unten)'),
-      h('p', { class: 'sub' }, 'Haken = wird gesichert. Neue Gäste werden automatisch mitgesichert, es sei denn, du nimmst den Haken heraus.'), hostBlocks,
-      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: save }, 'Speichern'), h('button', { onclick: dry }, 'Speichern und Trockenlauf'))), out);
+        c.job?.phase === 'läuft' ? h('button', { onclick: () => act({ action: 'abort' }, 'Im Tool abgebrochen.') }, 'Im Tool abbrechen') : null)),
+    jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', b.now), jobBox(c.job?.phase === 'läuft' ? c.last : (c.job ?? c.last), 'Letzter Lauf des Tools', b.now));
+
+  const settings = h('section', { class: 'panel' }, h('h2', {}, 'Einstellungen'),
+    h('div', { class: 'form-grid' }, h('label', { class: 'f' }, 'PBS-Host (wird heruntergefahren)', f.pbs), h('label', { class: 'f' }, 'Speicher auf den Hosts', f.storage),
+      h('label', { class: 'f' }, 'Wartezeit nach dem Hochfahren des PBS (Minuten)', f.wait), h('label', { class: 'f' }, 'Höchstens so lange auf einen Host oder Speicher warten (Minuten)', f.hostWait)),
+    h('p', {}, h('label', {}, f.shutdown, ' PBS nach vollständigem Erfolg herunterfahren')),
+    !c.pbs.rightShutdown ? h('p', { class: 'sub bad' }, `Auf ${c.pbs.label} ist das Recht „Herunterfahren“ nicht freigegeben (Reiter Hosts einrichten).`) : null);
+
+  // Auswahl der Gäste: ein Host nach dem anderen, ohne die Haken der anderen zu verlieren
+  let curHost = c.hosts.some((x) => x.id === ui.tabs['bk-lauf-host']) ? ui.tabs['bk-lauf-host'] : c.hosts[0]?.id;
+  const pickArea = h('div', {});
+  const count = (id) => { const p = picks.get(id); return p.enabled.checked ? `${p.boxes.filter((y) => y.box.checked).length}/${p.boxes.length}` : 'aus'; };
+  const segBtns = c.hosts.map((x) => h('button', { type: 'button', onclick: () => { curHost = x.id; ui.tabs['bk-lauf-host'] = x.id; drawPicks(); } }));
+  const drawPicks = () => {
+    c.hosts.forEach((x, i) => { segBtns[i].setAttribute('aria-pressed', String(x.id === curHost)); segBtns[i].replaceChildren(`${c.hosts.indexOf(x) + 1}. ${x.label} (${count(x.id)})`); });
+    const x = c.hosts.find((y) => y.id === curHost); if (!x) { pickArea.replaceChildren(h('p', { class: 'sub' }, 'Keine Hosts.')); return; }
+    const p = picks.get(x.id);
+    const all = (on) => { p.boxes.forEach((y) => { y.box.checked = on; }); markEdit(); drawPicks(); };
+    pickArea.replaceChildren(...[
+      h('p', {}, h('label', {}, p.enabled, ` ${x.label} beim Backup-Lauf sichern`), x.right ? '' : h('span', { class: 'sub bad' }, ' · Recht „Backups starten“ fehlt auf diesem Host')),
+      p.boxes.length ? h('div', { class: 'checks big' }, p.boxes.map(({ g, box }) => h('label', { class: g.status === 'running' ? '' : 'sub' }, box, ` ${g.vmid} ${g.name}${g.status === 'running' ? '' : ' (aus)'}`))) : h('p', { class: 'sub' }, 'Noch keine Gäste gelesen.'),
+      p.unknown.length ? h('p', { class: 'sub' }, `Außerdem ausgeschlossen (zurzeit nicht vorhanden): ${p.unknown.join(', ')}`) : null,
+      h('div', { class: 'row' }, h('button', { type: 'button', onclick: () => all(true) }, 'Alle auswählen'), h('button', { type: 'button', onclick: () => all(false) }, 'Keine'))].filter(Boolean));
+  };
+  const markEdit = () => { ui.dirty = true; document.querySelector('.paused')?.removeAttribute('hidden'); };
+  for (const p of picks.values()) { p.enabled.addEventListener('change', drawPicks); p.boxes.forEach((y) => y.box.addEventListener('change', () => segBtns.forEach((bt, i) => bt.replaceChildren(`${i + 1}. ${c.hosts[i].label} (${count(c.hosts[i].id)})`)))); }
+  drawPicks();
+  const guests = h('section', { class: 'panel' }, h('h2', {}, 'Was wird gesichert?'),
+    h('p', { class: 'sub' }, 'Die Hosts werden in dieser Reihenfolge gesichert. Haken = wird gesichert. Neue Gäste werden automatisch mitgesichert, es sei denn, du nimmst den Haken heraus.'),
+    c.hosts.length > 1 ? h('div', { class: 'seg hostseg', role: 'group', 'aria-label': 'Host wählen' }, segBtns) : null, pickArea);
+  const actions = h('section', { class: 'panel' }, h('div', { class: 'row' }, h('button', { class: 'primary', onclick: save }, 'Einstellungen und Auswahl speichern'), h('button', { onclick: dry }, 'Speichern und Trockenlauf')));
+  return [status, settings, guests, actions, out];
+}
+
+function snapshotsTab(b, data) {
+  const hosts = b.hosts.filter((x) => x.supported && x.autosnap?.known);
+  if (!hosts.length) return h('p', { class: 'empty' }, 'Auf keinem Host wurde proxmox-autosnap gefunden.');
+  return hostSwitch('bk-host', hosts.map((x) => ({ id: x.id, label: x.label, level: x.supported ? (x.autosnap?.enabled ? 'ok' : 'watch') : 'unknown' })), (id) => {
+    const host = b.hosts.find((x) => x.id === id);
+    if (!host.supported) return unsupported(host, data);
+    return [h('section', { class: 'panel' }, h('h2', {}, `Zustand auf ${host.label}`), autosnapBox(host), snapControlBox(host, data)), planCard(host, data),
+      host.autosnap?.log?.length ? fold(`snaplog-${host.id}`, 'Letzte Meldungen von autosnap', `${host.autosnap.log.length} ${host.autosnap.log.length === 1 ? 'Zeile' : 'Zeilen'}`, () => h('pre', { class: 'log' }, host.autosnap.log.join('\n'))) : null];
+  });
+}
+
+// Nur Hosts mit Gästen oder Backup-Läufen (der PBS selbst hat keine). Veraltete Hosts stehen oben im Hinweis.
+const withGuests = (b) => b.hosts.filter((x) => x.supported && (x.guests.length || x.tasks.length));
+
+function guestsTab(b, data) {
+  if (!withGuests(b).length) return h('p', { class: 'empty' }, 'Noch keine Gäste gelesen.');
+  return hostSwitch('bk-host', withGuests(b).map((x) => ({ id: x.id, label: x.label, level: hostLevelOf(x) })), (id) => {
+    const host = b.hosts.find((x) => x.id === id);
+    if (!host.supported) return unsupported(host, data);
+    return [runBoxes(host, b.now), h('section', { class: 'panel' }, h('h2', {}, `Gäste auf ${host.label} (${host.guests.length})`), guestsTable(host, b.now))];
+  });
+}
+
+function runsTab(b, data) {
+  if (!withGuests(b).length) return h('p', { class: 'empty' }, 'Noch keine Backup-Läufe gelesen.');
+  return hostSwitch('bk-host', withGuests(b).map((x) => ({ id: x.id, label: x.label, level: hostLevelOf(x) })), (id) => {
+    const host = b.hosts.find((x) => x.id === id);
+    if (!host.supported) return unsupported(host, data);
+    return [runBoxes(host, b.now), h('p', { class: 'sub' }, `Backup-Läufe auf ${host.label}, neueste zuerst. Auf eine Zeile klicken für die Gäste und das Protokoll.`), runsList(host)];
+  });
 }
 
 export function backupsView(b, data) {
   if (!b) return h('p', { class: 'empty' }, 'Keine Daten. Bitte neu laden.');
-  const k = b.kpi, last = b.lastRun;
   const outdated = b.hosts.filter((x) => x.reachable && !x.supported && x.gate.version != null);
-  const kpis = h('div', { class: 'kpis' },
-    kpi('Letzter Backup-Lauf', last ? ago(last.start, b.now) : '–', last ? `${last.hostLabel}: ${last.status === 'OK' ? 'in Ordnung' : last.status ?? 'läuft'}` : 'noch keiner gelesen', last && last.status !== 'OK' && last.status ? 'bad' : last ? 'ok' : ''),
-    kpi('Backup-Läufe (30 Tage)', k.runs30, 'auf allen Hosts'), kpi('Fehlgeschlagene Backups', k.failedBackups, k.failedBackups ? (k.failedCause === 'verbindung' ? 'meist: Verbindung zum PBS (siehe Lauf)' : 'beim letzten Lauf des Gastes') : 'keine', k.failedBackups ? 'bad' : 'ok'),
-    kpi('Snapshots', k.snapshotsOff ? `${k.snapshotsOn} an, ${k.snapshotsOff} aus` : `${k.snapshotsOn} Hosts an`, 'Schalter von proxmox-autosnap', k.snapshotsOff ? 'watch' : 'ok'),
-    kpi('Gäste mit Hinweis', k.problems, `von ${k.guests} Gästen`, k.problems ? 'watch' : 'ok'));
+  const running = b.control?.job?.phase === 'läuft';
+  const { nav, cur } = subTabs('bk', [['ueberblick', 'Überblick'], ['lauf', 'Backup-Lauf', running ? 'läuft' : null], ['snapshots', 'Snapshots'], ['gaeste', 'Gäste', b.kpi.problems || null], ['laeufe', 'Backup-Läufe']]);
+  const body = { ueberblick: () => overviewTab(b, data), lauf: () => laufTab(b), snapshots: () => snapshotsTab(b, data), gaeste: () => guestsTab(b, data), laeufe: () => runsTab(b, data) }[cur]();
   return [
-    h('section', { class: 'panel' }, h('h2', {}, 'Backups und Snapshots'), h('p', { class: 'sub' }, 'Gäste, Snapshot-Stand und Backup-Läufe der Hosts. Snapshots und Backup-Läufe kann das Tool auch selbst steuern (siehe unten und „Planung ändern“ je Host).')),
-    outdated.map((x) => h('div', { class: 'banner warn' }, h('div', {}, h('b', {}, `Das Prüfskript auf ${x.label} ist veraltet (Version ${x.gate.version}).`), h('div', { class: 'sub' }, `Für die Anzeige von Backups und Snapshots wird Version ${x.gate.expected} gebraucht.`)),
+    outdated.map((x) => h('div', { class: 'banner warn' }, h('div', {}, h('b', {}, `Das Prüfskript auf ${x.label} ist veraltet (Version ${x.gate.version}).`), h('div', { class: 'sub' }, `Für Backups und Snapshots wird Version ${x.gate.expected} gebraucht.`)),
       h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => ctx.openUpdate(data.hosts.find((y) => y.id === x.id)) }, 'Jetzt aktualisieren')))),
-    kpis, controlPanel(b, data), b.hosts.map((x) => hostPanel(b, x, data)),
+    h('div', { style: 'margin-top:14px' }, nav), body,
   ];
 }

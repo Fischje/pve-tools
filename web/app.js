@@ -1,11 +1,12 @@
 // Oberfläche von pve-disk-tool. Reines JavaScript ohne Abhängigkeiten.
 // Alle Texte werden per textContent eingesetzt, nie als HTML (kein XSS durch Gerätenamen o. Ä.).
 
+import { ui, fold, subTabs, hostSwitch } from './dom.js';
 import { HOURS_HINT, fmtCount, WD, KIND, ICON, LABEL, RUN_LABEL, RESULT, h, put, d2, fmtDate, fmtDT, fmtSize, fmtAge, fmtUp, pill, fact, meter, topFinding, wearLevel, ctx, fmtDay, fmtMin, dur } from './dom.js';
 
 import { globalStats, hostStatsSection } from './stats-view.js';
 import { runningPanel, hostTestsPanel, allTestsPanel } from './tests-view.js';
-import { hostPage } from './host-view.js';
+import { hostPage, hostViewGo } from './host-view.js';
 import { backupsView } from './backups-view.js';
 
 const BRAND = "Fischje's PVE-Tools";
@@ -24,9 +25,26 @@ async function api(method, path, body) {
 
 // ---------- Aktionen ----------
 async function act(fn, okMsg) {
-  try { await fn(); if (okMsg) flash = { ok: okMsg }; } catch (e) { flash = { err: e.message }; }
+  try { await fn(); if (okMsg) flash = { ok: okMsg }; } catch (e) {
+    // Bei einem Fehler bleibt die Seite stehen, damit eingegebene Werte nicht verloren gehen: nur die Meldung anzeigen.
+    if (ui.dirty) { showFlash({ err: e.message }); return; }
+    flash = { err: e.message };
+  }
+  ui.dirty = false;
   await load();
 }
+
+// ---------- Bearbeiten: automatische Aktualisierung pausieren ----------
+// Sobald in einem Formular etwas geändert wird, zeichnet die Seite sich nicht mehr selbst neu, bis gespeichert oder verworfen wird.
+const flashBox = h('div', {});
+const pausedBar = h('div', { class: 'paused', role: 'status', hidden: true }, h('span', {}, 'Automatische Aktualisierung ist pausiert, solange du hier etwas änderst.'),
+  h('button', { type: 'button', onclick: () => { ui.dirty = false; pausedBar.hidden = true; load(); } }, 'Änderungen verwerfen'));
+function showFlash(f) {
+  flashBox.replaceChildren(...[f.err ? h('div', { class: 'banner warn', role: 'alert' }, h('b', {}, f.err)) : f.ok ? h('div', { class: 'banner', role: 'status' }, f.ok) : null].filter(Boolean));
+}
+const markDirty = (e) => { if (e.target.matches?.('input, select, textarea') && !e.target.closest('.no-dirty, .login')) { ui.dirty = true; pausedBar.hidden = false; } };
+root.addEventListener('input', markDirty);
+root.addEventListener('change', markDirty);
 function startTest(host, d, type) {
   const est = type === 'long' && d.pollingExtended ? `ca. ${Math.round(d.pollingExtended / 60)} Stunden, wird bei Bedarf auf mehrere Tage aufgeteilt` : 'wenige Minuten';
   if (!confirm(`${type === 'long' ? 'Langtest' : 'Kurztest'} auf ${d.model} (${d.device}) starten?\nDauer: ${est}.\nDie Platte ist währenddessen etwas langsamer.`)) return;
@@ -86,10 +104,26 @@ function outdatedBanner(host) {
     h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => { view = 'hosts'; wizard = { mode: 'update', host, step: 1 }; render(); window.scrollTo(0, 0); } }, 'Jetzt aktualisieren')));
 }
 
+/** Füllstand der ZFS-Pools je Host (Übersicht). */
+function poolsOverview() {
+  const hosts = data.hosts.filter((x) => x.pools.length);
+  if (!hosts.length) return null;
+  const capLevel = (c) => (c == null ? 'unknown' : c >= 90 ? 'critical' : c >= 80 ? 'replace' : c >= 70 ? 'watch' : 'ok');
+  const layout = (p) => p.vdevs.filter((v) => v.section === 'data').map((v) => (v.type === 'disk' ? 'Einzelplatte' : v.name.replace(/-\d+$/, ''))).filter((x, i, a) => a.indexOf(x) === i).join(', ');
+  return [h('div', { class: 'sec-title' }, h('h2', {}, 'Speicherplatz (ZFS)')),
+    h('div', { class: 'pools' }, hosts.map((host) => h('article', { class: 'card' },
+      h('div', { class: 'card-head' }, h('div', { class: 'model' }, host.label), h('span', { class: 'sub' }, `${host.pools.length} ${host.pools.length === 1 ? 'Pool' : 'Pools'}${host.reachable ? '' : ' · nicht erreichbar, letzter Stand'}`)),
+      host.pools.map((p) => h('div', { class: 'pool-meter' },
+        meter(h('span', {}, h('b', {}, p.name), ` · ${layout(p) || '–'}${p.level !== 'ok' ? ` · ${LABEL[p.level] ?? p.level}` : ''}`), p.cap ?? 0, capLevel(p.cap),
+          p.cap != null ? `${p.cap} % belegt` : 'Füllstand unbekannt'),
+        h('div', { class: 'sub' }, p.size != null ? `${fmtSize(p.alloc)} von ${fmtSize(p.size)} belegt, ${fmtSize(p.free)} frei${p.frag != null ? ` · Fragmentierung ${p.frag} %` : ''}` : 'Größe erscheint nach der nächsten Abfrage.'))),
+      h('div', { class: 'row' }, h('button', { onclick: () => { view = 'host'; hostViewGo(host.id, 'zfs', null); } }, 'Pools im Detail')))))];
+}
+
 function viewOverview() {
   if (!data.hosts.length) return h('p', { class: 'empty' }, 'Keine Hosts eingerichtet. Öffne den Reiter „Hosts einrichten“.');
   return [data.hosts.filter((x) => x.gate?.outdated).map(outdatedBanner), data.hosts.map(bannerEl),
-    stats ? [globalStats(stats, data), hostStatsSection(stats, data)] : null,
+    stats ? globalStats(stats, data) : null, poolsOverview(), stats ? hostStatsSection(stats, data) : null,
     h('div', { class: 'sec-title' }, h('h2', {}, 'Alle Platten')), data.hosts.map(hostSection)];
 }
 
@@ -189,7 +223,7 @@ function mailPanel() {
   const save = async () => { await api('PUT', '/api/mail', body()); f.pw.value = ''; await load(false); };
   const run = (fn, okText) => async () => { try { await save(); await fn(); say(true, okText); } catch (e) { say(false, e.message); } };
   return h('section', { class: 'panel' }, h('h2', {}, 'E-Mail-Benachrichtigung'),
-    !authState.passwordSet ? h('p', { class: 'error' }, 'Setze zuerst unten ein Passwort für diese Oberfläche. Das Mail-Passwort wird auf dem LXC gespeichert und soll nicht für jeden im Netz zugänglich sein.') : null,
+    !authState.passwordSet ? h('p', { class: 'error' }, 'Setze zuerst im Unterreiter „Konto“ ein Passwort für diese Oberfläche. Das Mail-Passwort wird auf dem LXC gespeichert und soll nicht für jeden im Netz zugänglich sein.') : null,
     h('p', { class: 'sub' }, 'Es kommt eine Mail pro Änderung, keine Wiederholung bei jeder Abfrage. Beim Einschalten werden bereits bekannte Probleme still übernommen, gemeldet wird nur, was danach neu passiert. Mit „Zusammenfassung jetzt senden“ bekommst du den aktuellen Stand per Mail.'),
     h('label', {}, f.enabled, ' Benachrichtigung per E-Mail einschalten'),
     h('div', { class: 'form-grid panel2' }, h('label', { class: 'f' }, 'Mailserver', f.host), h('label', { class: 'f' }, 'Port', f.port), h('label', { class: 'f' }, 'Verschlüsselung', f.security),
@@ -205,7 +239,12 @@ function mailPanel() {
       m.passwordSet ? h('button', { class: 'danger', onclick: async () => { try { await api('PUT', '/api/mail', { clearPassword: true }); await load(false); say(true, 'Mail-Passwort gelöscht.'); } catch (e) { say(false, e.message); } } }, 'Gespeichertes Passwort löschen') : null));
 }
 
-const viewSettings = () => [data.hosts.map(hostSettingsForm), pollingPanel(), mailPanel(), accountPanel()];
+function viewSettings() {
+  const { nav, cur } = subTabs('settings', [['zeitplan', 'Zeitplan der Tests'], ['mail', 'E-Mail'], ['abfrage', 'Abfragerhythmus'], ['konto', 'Konto']]);
+  const body = { zeitplan: () => hostSwitch('settings-host', data.hosts.map((x) => ({ id: x.id, label: x.label })), (id) => hostSettingsForm(data.hosts.find((x) => x.id === id))),
+    mail: mailPanel, abfrage: pollingPanel, konto: accountPanel }[cur]();
+  return [h('div', { style: 'margin-top:14px' }, nav), body];
+}
 
 
 // ---------- Ansicht: Hosts einrichten ----------
@@ -330,7 +369,7 @@ function wizardPanel() {
     put(box, head,
       r.ok ? h('div', { class: 'finding ok' }, h('b', {}, w.mode === 'remove' ? '✔ Zugang entfernt' : w.mode === 'update' ? `✔ Aktualisiert auf Version ${r.version ?? ''}` : `✔ Eingerichtet${r.disks != null ? `, ${r.disks} Platten gefunden` : ''}`), w.mode === 'remove' ? 'Der Host ist wieder im Ausgangszustand.' : w.mode === 'update' ? 'Das Prüfskript auf dem Host ist jetzt aktuell.' : 'Der Host steht jetzt in der Übersicht. Die Zeitplan-Einstellungen findest du unter „Zeitplan & Konto“.')
         : h('div', { class: 'finding critical' }, h('b', {}, '✖ Nicht erfolgreich'), r.error ?? ''),
-      r.log ? h('details', { open: !r.ok }, h('summary', {}, 'Ausgabe vom Host'), h('pre', { class: 'log' }, r.log)) : null,
+      r.log ? fold('setup-log', 'Ausgabe vom Host', null, () => h('pre', { class: 'log' }, r.log), { open: !r.ok }) : null,
       h('div', { class: 'row' }, h('button', { class: 'primary', onclick: close }, 'Fertig'), r.ok ? null : h('button', { onclick: () => { w.step = w.mode === 'update' ? 1 : 2; render(); } }, 'Erneut versuchen')));
   }
   return box;
@@ -338,7 +377,7 @@ function wizardPanel() {
 
 function viewHosts() {
   const out = [];
-  if (!authState.passwordSet) out.push(h('div', { class: 'banner warn' }, h('span', {}, 'Die Einrichtung aus der Oberfläche nutzt das root-Passwort deines Hosts. Bitte setze dafür zuerst ein Passwort für diese Seite.'), h('button', { onclick: () => { view = 'zeitplan'; render(); } }, 'Passwort setzen')));
+  if (!authState.passwordSet) out.push(h('div', { class: 'banner warn' }, h('span', {}, 'Die Einrichtung aus der Oberfläche nutzt das root-Passwort deines Hosts. Bitte setze dafür zuerst ein Passwort für diese Seite.'), h('button', { onclick: () => { ui.tabs.settings = 'konto'; view = 'zeitplan'; render(); } }, 'Passwort setzen')));
   out.push(h('section', { class: 'panel' }, h('div', { class: 'host-head' }, h('h2', {}, 'Hosts'), h('span', { class: 'spacer' }), h('button', { class: 'primary', disabled: !authState.passwordSet || !!wizard, onclick: () => { wizard = { mode: 'new', step: 1 }; render(); } }, 'Host hinzufügen')), hostsTable(),
     h('p', { class: 'sub' }, 'Die Einrichtung ersetzt das manuelle Ausführen von setup-host.sh auf dem Host: einmalig mit dem root-Passwort verbinden, Zugang einrichten, Passwort vergessen. Nur Hosts im lokalen Netz.')));
   if (wizard) out.push(wizardPanel());
@@ -416,19 +455,21 @@ function render() {
   if (!data) { root.replaceChildren(h('p', { class: 'empty' }, 'Lade …')); return; }
   const tabs = [['uebersicht', 'Übersicht'], ['host', 'Hosts im Detail'], ['backups', 'Backups & Snapshots'], ['tests', 'Tests'], ['zeitplan', 'Zeitplan & Konto'], ['hosts', 'Hosts einrichten'], ['hilfe', 'Hilfe']];
   const body = { uebersicht: viewOverview, host: viewHostPage, backups: () => backupsView(backups, data), tests: viewTests, zeitplan: viewSettings, hosts: viewHosts, hilfe: viewHelp }[view]();
-  const f = flash.err ? h('div', { class: 'banner warn', role: 'alert' }, h('b', {}, flash.err)) : flash.ok ? h('div', { class: 'banner', role: 'status' }, flash.ok) : null; flash = {};
+  showFlash(flash); flash = {};
+  pausedBar.hidden = !ui.dirty;
   const scrollY = window.scrollY;
   root.replaceChildren(...[
     h('header', { class: 'top' },
       h('div', { class: 'brand' }, h('b', {}, BRAND), h('span', { class: 'sub' }, 'Platten, ZFS und Tests')),
       h('div', { class: 'title-row' }, h('div', { class: 'summary' }, h('span', { class: `dot ${data.summary.level}`, 'aria-hidden': 'true' }), h('span', { role: 'status' }, data.summary.text)), h('span', { class: 'sub' }, `Stand ${fmtDT(data.now)}`)),
-      h('nav', { class: 'tabs', 'aria-label': 'Bereiche' }, tabs.map(([id, t]) => h('button', { 'aria-current': view === id ? 'page' : null, onclick: () => { view = id; render(); window.scrollTo(0, 0); } }, t)))),
-    !authState.passwordSet ? h('div', { class: 'banner warn' }, h('span', {}, 'Es ist noch kein Passwort gesetzt. Die Seite ist nur im lokalen Netz erreichbar, aber jeder dort kann Tests starten.'), h('button', { onclick: () => { view = 'zeitplan'; render(); } }, 'Passwort setzen')) : null,
-    f, body].flat(Infinity).filter(Boolean));
+      h('nav', { class: 'tabs', 'aria-label': 'Bereiche' }, tabs.map(([id, t]) => h('button', { 'aria-current': view === id ? 'page' : null, onclick: () => { view = id; ui.dirty = false; render(); window.scrollTo(0, 0); } }, t))), pausedBar),
+    !authState.passwordSet ? h('div', { class: 'banner warn' }, h('span', {}, 'Es ist noch kein Passwort gesetzt. Die Seite ist nur im lokalen Netz erreichbar, aber jeder dort kann Tests starten.'), h('button', { onclick: () => { ui.tabs.settings = 'konto'; view = 'zeitplan'; render(); } }, 'Passwort setzen')) : null,
+    flashBox, body].flat(Infinity).filter(Boolean));
   window.scrollTo(0, scrollY);
 }
 
-async function load(redraw = true) {
+async function load(redraw = true, auto = false) {
+  if (!auto) ui.dirty = false; // jedes gewollte Neuladen (Speichern, Knopf) beendet die Bearbeitungs-Pause
   try {
     const st = await fetch('/api/auth/status').then((r) => r.json());
     authState = st;
@@ -441,4 +482,4 @@ async function load(redraw = true) {
 Object.assign(ctx, { act, api, startTest, abortTest, openDetail, diskCard, render: () => render(), openUpdate: (host) => { view = 'hosts'; wizard = { mode: 'update', host, step: 1 }; render(); window.scrollTo(0, 0); } });
 
 load();
-timer = setInterval(() => { if (view !== 'zeitplan' && view !== 'hosts' && !dialogOpen) load(); }, 20000);
+timer = setInterval(() => { if (view !== 'zeitplan' && view !== 'hosts' && !dialogOpen && !ui.dirty) load(true, true); }, 20000);

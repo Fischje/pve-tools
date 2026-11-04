@@ -108,7 +108,7 @@ function menu(data) {
     const active = host.id === sel.hostId;
     const item = (label, tab, focus, level, subtitle) => h('button', { class: `navitem${active && sel.tab === tab && (sel.focus ?? null) === (focus ?? null) ? ' on' : ''}`, onclick: () => go(host.id, tab, focus), 'aria-current': active && sel.tab === tab && (sel.focus ?? null) === (focus ?? null) ? 'true' : null },
       level ? dot(level) : null, h('span', { class: 'nl' }, label), subtitle ? h('span', { class: 'sub' }, subtitle) : null);
-    return h('details', { open: active || data.hosts.length <= 3 }, h('summary', {}, dot(hostLevel(host)), h('b', {}, host.label), h('span', { class: 'sub' }, host.reachable ? 'online' : 'offline')),
+    return h('div', { class: `navhost${active ? ' active' : ''}` }, h('button', { class: 'navhead', onclick: () => go(host.id, 'overview', null) }, dot(hostLevel(host)), h('b', {}, host.label), h('span', { class: 'sub' }, host.reachable ? 'online' : 'offline')),
       item('Überblick', 'overview', null),
       host.pools.length ? [h('div', { class: 'navgroup' }, 'ZFS-Pools'), host.pools.map((p) => item(p.name, 'zfs', p.name, p.level, p.cap != null ? `${p.cap} %` : ''))] : null,
       host.disks.length ? [h('div', { class: 'navgroup' }, `Platten (${host.disks.length})`), host.disks.map((d) => item(d.model, 'disks', d.serial, d.level, d.device.replace('/dev/', '')))] : null,
