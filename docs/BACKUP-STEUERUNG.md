@@ -51,7 +51,7 @@ Das Tool bekommt kein Löschrecht.
 - **Neue Befehle im Prüfskript:** `snap-run hourly|weekly|monthly [force]`, `snap-switch on|off`, `snap-cron on|off|status`, lesend `rechte`. Alle mit festen Werten,
   ein Sperrmechanismus (`flock`) verhindert zwei Läufe gleichzeitig.
 - **Übernahme:** Button „Das Tool übernimmt“ im Reiter „Backups & Snapshots“. Das Tool benennt zuerst `/etc/cron.d/proxmox-autosnap` in `….tool-aus` um (cron ignoriert
-  Dateien mit Punkt im Namen, nichts wird gelöscht) und stellt dann um. „Zurück zum Cron“ macht es rückgängig, in umgekehrter Reihenfolge.
+  Dateien mit Punkt im Namen, nichts wird gelöscht) und stellt dann um. Einen Weg zurück zum Cron gibt es in der Oberfläche nicht mehr (seit 2026-11-05: das Tool steuert immer); von Hand: Datei zurückbenennen. 
 - **Zeitplan wie bisher:** stündlich um :05, wöchentlich sonntags 00:25, monatlich am 1. um 00:45 (ist der 1. der Pausentag, am 2.). Pausentag und Schalter liest das Tool
   aus dem Wrapper. Montags löst es nichts aus.
 - **Nachholen:** Ist der Host zur Zeit eines Wochen- oder Monatslaufs aus (der `pve` nachts), holt das Tool den Lauf nach, sobald der Host läuft (nach 10 Minuten Laufzeit,
@@ -104,24 +104,29 @@ Das Tool ersetzt den Orchestrator auf dem PBS (`pbs-run-backups.sh`). Es läuft 
    die Ursache („Verbindung zum PBS fehlte oder brach ab“).
 6. Während auf einem Host ein vom Tool gesteuertes Backup läuft, startet das Tool dort keine Platten-Tests.
 
-**Einstellungen** (Reiter „Backups & Snapshots“, „Backup-Lauf“): Betriebsart „beobachten“ oder „steuern“, Backup-Tage, PBS-Host, Speichername, Wartezeiten, Herunterfahren an/aus, je Host die Auswahl der Gäste.
+**Einstellungen** (Reiter „Backups & Snapshots“, „Backup-Lauf“): Backup-Tage, automatisches Einschalten (Uhrzeit), PBS-Host, Speichername, Wartezeiten, Herunterfahren an/aus, je Host die Auswahl der Gäste.
 Gespeichert wird eine **Ausschlussliste** (wie `--all --exclude`), deshalb werden neue Gäste automatisch mitgesichert. Voreinstellung für `pve`: Ausschluss von 109, 112, 113, 114, 116, 119, 117, 159, 161, 171
 (aus dem alten Skript übernommen).
 
 **Neue Rechte** (nur mit dem root-Passwort freigebbar, Prüfskript Version 8): `backup-starten` auf den PVE-Hosts (Befehl `backup-start <speicher> all|exclude <ids>|only <ids>`, feste Parameter, nur Ziffern in den Listen,
 fester Dienstname, damit nie zwei Läufe gleichzeitig starten) und `herunterfahren` auf dem PBS (Befehl `poweroff`, 20 Sekunden Verzögerung). Lesend ohne Recht: `storage-status <name>`.
 
-**Umstellen (empfohlene Reihenfolge)**
+**Das Tool steuert immer** (seit 2026-11-05 gibt es keine Betriebsart „beobachten“ mehr). Nach einem Update gilt ein gerade laufender Boot des PBS als
+erledigt, es startet also nicht sofort ein Lauf.
+
+**Automatisch einschalten:** An Backup-Tagen schickt das Tool um die eingestellte Uhrzeit (Voreinstellung 08:00) ein Magic Packet an den PBS, wenn er aus ist
+und an diesem Tag noch nicht lief. Bis zu drei Versuche im Abstand von 10 Minuten; klappt es nicht, gibt es ein Ereignis und eine Mail. Damit ersetzt das Tool einen
+Cron, ein BIOS-Timer oder Ähnliches, das den PBS bisher montags einschaltet. Den alten Weg erst entfernen, wenn das Einschalten durch das Tool einmal geklappt hat.
+
+**Umstellen (Reihenfolge)**
 1. „Skript aktualisieren“ bei `router`, `pve` und `pbs`: Haken „Backups starten erlauben“ bei den PVE-Hosts, „Herunterfahren erlauben“ beim PBS.
-2. In „Backup-Lauf“ den PBS-Host prüfen, die Gäste-Auswahl ansehen, „Speichern und Trockenlauf“. Der Trockenlauf startet nichts und meldet Probleme (Recht fehlt, Host/Speicher nicht erreichbar).
-3. Mit der Betriebsart „beobachten“ lassen, bis ein Lauf des alten Orchestrators durch ist: Das Tool zeigt ihn wie bisher in „Backup-Läufe“.
-4. **Den alten Orchestrator auf dem PBS abschalten** (Cron `@reboot`, z. B. mit `crontab -e` auskommentieren). Er soll nicht neben dem Tool laufen.
-5. Betriebsart auf „Das Tool steuert“. Beim Umschalten gilt der gerade laufende Boot des PBS als erledigt, es startet also nicht sofort ein Lauf. Der nächste Boot löst den ersten Lauf aus.
-   Zum Testen gibt es „Jetzt Backup starten“ (PBS muss laufen).
-6. Danach das root-Passwort aus `pbs-run-backups.sh` auf den Hosts ändern und das Skript löschen.
+2. **Den alten Orchestrator auf dem PBS abschalten** (Cron `@reboot` auskommentieren). Er fährt den PBS sonst etwa 20 Minuten nach dem Start herunter, mitten in den Lauf des Tools.
+3. In „Backup-Lauf“ die Gäste-Auswahl ansehen, „Speichern und Trockenlauf“. Der Trockenlauf startet nichts und meldet Probleme.
+4. „PBS einschalten“ einmal von Hand ausprobieren (Wake-on-LAN). Wenn das klappt, den alten Einschalt-Cron (oder BIOS-Timer) für montags entfernen.
+5. `pbs-run-backups.sh` löschen.
 
 **Grenzen**
-- Das Tool schaltet den PBS nicht ein (Wake-on-LAN, Zeitschaltuhr oder BIOS bleiben Sache der Umgebung). Das ließe sich später ergänzen.
+- Wake-on-LAN muss im BIOS und an der Netzwerkkarte des PBS aktiv sein (das Tool zeigt den Zustand ab Prüfskript Version 9).
 - „Abbrechen“ im Tool beendet nur die Steuerung. Ein schon laufendes vzdump läuft auf dem Host weiter.
 - Fällt der LXC `pve-tools` aus, gibt es weder Backup-Läufe noch Snapshots. Die Mail-Überwachung der Läufe zeigt nur, was das Tool selbst gesehen hat.
 

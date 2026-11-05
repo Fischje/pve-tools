@@ -74,7 +74,7 @@ function snapControlBox(host, data) {
     failed ? h('div', { class: 'sub bad' }, `Letzter Fehler: ${failed.text}`) : null,
     h('div', { class: 'actions' },
       sc.cronStillActive ? h('button', { class: 'primary', onclick: () => post({ action: 'mode', mode: 'tool' }, 'Cron ausgeschaltet.') }, 'Cron jetzt ausschalten') : null,
-      sc.mode === 'tool' ? h('button', { onclick: () => { if (confirm('Wieder den Cron auf dem Host verwenden?')) post({ action: 'mode', mode: 'cron' }, 'Cron auf dem Host ist wieder aktiv.'); } }, 'Zurück zum Cron')
+      sc.mode === 'tool' ? null
         : h('button', { class: 'primary', onclick: () => { if (confirm('Das Tool löst die Snapshots künftig aus und schaltet den Cron auf dem Host aus. Fortfahren?')) post({ action: 'mode', mode: 'tool' }, 'Das Tool löst die Snapshots jetzt aus.'); } }, 'Das Tool übernimmt'),
       h('button', { onclick: () => post({ action: 'switch', on: !as.enabled }, as.enabled ? 'Snapshots ausgeschaltet.' : 'Snapshots eingeschaltet.') }, as.enabled ? 'Snapshots ausschalten' : 'Snapshots einschalten'),
       h('button', { onclick: () => { if (confirm('Jetzt einen stündlichen Snapshot-Lauf auslösen?')) post({ action: 'run', label: 'hourly' }, 'Lauf ausgelöst.'); } }, 'Jetzt stündlichen Lauf auslösen')));
@@ -191,7 +191,7 @@ function overviewTab(b, data) {
         h('div', { class: 'row' }, h('button', { onclick: () => goTab('gaeste', host.id) }, 'Gäste'), h('button', { onclick: () => goTab('laeufe', host.id) }, 'Backup-Läufe'), as?.known ? h('button', { onclick: () => goTab('snapshots', host.id) }, 'Snapshots') : null)]);
   });
   return [kpis,
-    c ? h('section', { class: 'panel' }, h('div', { class: 'card-title' }, h('h2', {}, 'Backup-Lauf'), h('span', { class: `pill ${c.settings.mode === 'steuern' ? 'ok' : 'unknown'}` }, c.settings.mode === 'steuern' ? 'Das Tool steuert' : 'Das Tool beobachtet nur'), h('span', { class: 'spacer' }), h('button', { onclick: () => goTab('lauf') }, 'Öffnen')),
+    c ? h('section', { class: 'panel' }, h('div', { class: 'card-title' }, h('h2', {}, 'Backup-Lauf'), h('span', { class: 'spacer' }), h('button', { onclick: () => goTab('lauf') }, 'Öffnen')),
       pbsPower(c), jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', now) ?? jobBox(c.last, 'Letzter Lauf des Tools', now) ?? h('p', { class: 'sub' }, 'Das Tool hat noch keinen Backup-Lauf gesteuert.')) : null,
     h('div', { class: 'grid' }, cards)];
 }
@@ -262,6 +262,7 @@ function laufTab(b) {
   const f = { pbs: h('select', {}, c.hostChoices.map((x) => h('option', { value: x.id, selected: x.id === s.pbsHostId }, x.label))), storage: field('text', s.storage, { size: 10 }),
     wait: field('number', s.waitAfterBootMin, { min: 0, max: 240, style: 'width:6em' }), hostWait: field('number', s.hostWaitMin, { min: 1, max: 240, style: 'width:6em' }),
     shutdown: h('input', { type: 'checkbox', checked: s.shutdown }),
+    autoWake: h('input', { type: 'checkbox', checked: s.autoWake }), wakeTime: h('input', { type: 'time', value: s.wakeTime }),
     mac: field('text', s.wolMac, { placeholder: c.wol?.learned?.mac ? `${c.wol.learned.mac} (gelernt)` : 'aa:bb:cc:dd:ee:ff', size: 20 }), bcast: field('text', s.wolBroadcast, { size: 18 }),
     days: [1, 2, 3, 4, 5, 6, 0].map((d) => ({ d, box: h('input', { type: 'checkbox', checked: s.backupDays.includes(d) }) })) };
   const dayNames = (list) => [1, 2, 3, 4, 5, 6, 0].filter((d) => list.includes(d)).map((d) => WD[d]).join(', ');
@@ -272,7 +273,7 @@ function laufTab(b) {
     unknown: x.select === 'exclude' ? x.ids.filter((id) => !x.guests.some((g) => g.vmid === id)) : [],
   }]));
   const collect = () => ({
-    storage: f.storage.value.trim(), pbsHostId: f.pbs.value, wolMac: f.mac.value.trim(), wolBroadcast: f.bcast.value.trim(), backupDays: f.days.filter((x) => x.box.checked).map((x) => x.d), waitAfterBootMin: Number(f.wait.value), hostWaitMin: Number(f.hostWait.value), shutdown: f.shutdown.checked,
+    storage: f.storage.value.trim(), pbsHostId: f.pbs.value, autoWake: f.autoWake.checked, wakeTime: f.wakeTime.value || '08:00', wolMac: f.mac.value.trim(), wolBroadcast: f.bcast.value.trim(), backupDays: f.days.filter((x) => x.box.checked).map((x) => x.d), waitAfterBootMin: Number(f.wait.value), hostWaitMin: Number(f.hostWait.value), shutdown: f.shutdown.checked,
     hosts: Object.fromEntries(c.hosts.map((x) => { const p = picks.get(x.id); const off = [...p.boxes.filter((y) => !y.box.checked).map((y) => y.g.vmid), ...p.unknown]; return [x.id, { enabled: p.enabled.checked, select: 'exclude', ids: off }]; })),
   });
   const out = h('div', {});
@@ -290,15 +291,11 @@ function laufTab(b) {
     } catch (e) { out.replaceChildren(h('div', { class: 'banner warn' }, e.message)); }
   };
   const save = () => act({ action: 'settings', settings: collect() }, 'Einstellungen gespeichert.');
-  const steuern = s.mode === 'steuern';
-
   const status = h('section', { class: 'panel' }, h('h2', {}, 'Status'), pbsPower(c),
-    h('div', { class: `finding ${steuern ? 'ok' : 'info'}` },
-      h('b', {}, steuern ? 'Das Tool steuert die Backup-Läufe' : 'Das Tool beobachtet nur (der bisherige Orchestrator auf dem PBS läuft)'),
-      h('div', { class: 'sub' }, steuern ? `${s.backupDays.length ? `Backup-Tage: ${dayNames(s.backupDays)}.` : 'Keine Backup-Tage gewählt: es wird nur von Hand gesichert.'} Fährt der PBS an einem Backup-Tag hoch, wartet das Tool ${s.waitAfterBootMin} min und sichert dann Host für Host. An anderen Tagen bleibt er an, ohne zu sichern. Nach dem Lauf wird der PBS nur nach vollständigem Erfolg heruntergefahren${s.shutdown ? '' : ' (ausgeschaltet: er bleibt immer an)'}.` : 'Zuerst Einstellungen und Trockenlauf prüfen. Dann auf „Das Tool steuert“ umstellen und auf dem PBS den alten Orchestrator abschalten (Cron @reboot auskommentieren).'),
+    h('div', { class: 'finding info' },
+      h('b', {}, s.backupDays.length ? `Backup-Tage: ${dayNames(s.backupDays)}` : 'Keine Backup-Tage gewählt: es wird nur von Hand gesichert'),
+      h('div', { class: 'sub' }, `${s.autoWake && s.backupDays.length ? `An Backup-Tagen schaltet das Tool den PBS um ${s.wakeTime} Uhr per Wake-on-LAN ein. ` : ''}Fährt der PBS an einem Backup-Tag hoch, wartet das Tool ${s.waitAfterBootMin} min und sichert dann Host für Host. Nach dem geplanten Lauf wird der PBS nur bei vollständigem Erfolg heruntergefahren${s.shutdown ? '' : ' (ausgeschaltet: er bleibt immer an)'}. An anderen Tagen und nach einem Lauf von Hand bleibt er an.`),
       h('div', { class: 'actions' },
-        steuern ? h('button', { onclick: () => act({ action: 'settings', settings: { mode: 'beobachten' } }, 'Das Tool beobachtet nur.') }, 'Zurück auf „nur beobachten“')
-          : h('button', { class: 'primary', onclick: () => { if (confirm('Das Tool steuert ab jetzt die Backups. Hast du den alten Orchestrator auf dem PBS abgeschaltet?')) act({ action: 'settings', settings: { mode: 'steuern' } }, 'Das Tool steuert die Backups.'); } }, 'Das Tool steuert'),
         h('button', { disabled: c.job?.phase === 'läuft', onclick: () => manualDialog(c) }, 'Jetzt Backup starten …'),
         c.job?.phase === 'läuft' ? h('button', { onclick: () => act({ action: 'abort' }, 'Im Tool abgebrochen.') }, 'Im Tool abbrechen') : null)),
     jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', b.now), jobBox(c.job?.phase === 'läuft' ? c.last : (c.job ?? c.last), 'Letzter Lauf des Tools', b.now));
@@ -310,6 +307,7 @@ function laufTab(b) {
     h('div', { class: 'f' }, h('span', {}, 'Backup-Tage: An diesen Tagen sichert das Tool automatisch, wenn der PBS hochfährt. An anderen Tagen bleibt der PBS an, ohne zu sichern.'),
       h('div', { class: 'checks big' }, f.days.map(({ d, box }) => h('label', {}, box, ` ${WD[d]}`)))),
     h('div', { class: 'form-sec' }, h('h3', {}, 'Einschalten per Wake-on-LAN'),
+      h('div', { class: 'row' }, h('label', {}, f.autoWake, ' An Backup-Tagen automatisch einschalten um '), f.wakeTime, h('span', { class: 'sub' }, ' (bis zu drei Versuche im Abstand von 10 Minuten)')),
       h('div', { class: 'form-grid' }, h('label', { class: 'f' }, 'MAC-Adresse des PBS (leer = gelernte Adresse verwenden)', f.mac), h('label', { class: 'f' }, 'Broadcast-Adresse', f.bcast)),
       wolHint(c)),
     c.lastSkip ? h('p', { class: 'sub' }, `Zuletzt ohne Backup hochgefahren (kein Backup-Tag): ${fmtDT(c.lastSkip)}.`) : null,

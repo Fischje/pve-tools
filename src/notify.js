@@ -182,6 +182,13 @@ export class Notifier {
     if (sent) this.db.setAlert(key, 'sent', 'sent', this.engine.now());
   }
 
+  /** Einzelne Meldung zur Backup-Steuerung, je Schlüssel nur einmal. */
+  async backupNotice(key, subject, text) {
+    if (!this.ready() || !this.config().notify.backup || this.db.getAlert(key)) return;
+    const c = this.config();
+    if (await this.safeDeliver(subject, `${text}\n${this.link(c)}${this.foot()}`)) this.db.setAlert(key, 'sent', 'sent', this.engine.now());
+  }
+
   /** Aufgerufen, wenn ein Selbsttest mit Fehler endet (nicht bei „unterbrochen“). */
   async testFailed({ hostId, runId, disk, note, kind }) {
     if (!this.ready() || !this.config().notify.test) return;

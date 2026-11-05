@@ -136,7 +136,8 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       if (!engine.hosts.some((h) => h.id === hostId)) return send(res, 404, { error: 'Host unbekannt' });
       const b = await readBody(req);
       try {
-        if (b.action === 'mode') await engine.setSnapMode(hostId, b.mode);
+        // Nur noch die Übernahme durch das Tool; zurück zum Cron gibt es in der Oberfläche nicht mehr.
+        if (b.action === 'mode') { if (b.mode !== 'tool') throw new Error('Ungültiger Modus'); await engine.setSnapMode(hostId, 'tool'); }
         else if (b.action === 'switch') await engine.setSnapSwitch(hostId, !!b.on);
         else if (b.action === 'plan') await engine.setSnapPlan(hostId, { plan: b.plan, keep: b.keep, pauseDay: 'pauseDay' in b ? b.pauseDay : undefined });
         else if (b.action === 'dryrun') {

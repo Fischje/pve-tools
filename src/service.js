@@ -190,7 +190,7 @@ function backupControl(engine) {
   return {
     wol: (() => { const t = o.wolTarget(s); return { mac: t.mac, manual: t.manual, learned: t.learned ? { mac: t.learned.mac ?? null, wol: t.learned.wol ?? null, phys: t.learned.phys ?? null, source: t.learned.source ?? 'gate', ts: iso(t.learned.ts) } : null, broadcast: t.broadcast }; })(),
     lastSkip: iso(Number(db.getSetting('backup_lastskip') ?? 0) || null),
-    settings: { mode: s.mode, pbsHostId: s.pbsHostId, storage: s.storage, backupDays: s.backupDays, wolMac: s.wolMac, wolBroadcast: s.wolBroadcast, waitAfterBootMin: s.waitAfterBootMin, shutdown: s.shutdown, hostWaitMin: s.hostWaitMin },
+    settings: { autoWake: s.autoWake, wakeTime: s.wakeTime, pbsHostId: s.pbsHostId, storage: s.storage, backupDays: s.backupDays, wolMac: s.wolMac, wolBroadcast: s.wolBroadcast, waitAfterBootMin: s.waitAfterBootMin, shutdown: s.shutdown, hostWaitMin: s.hostWaitMin },
     hostChoices: engine.hosts.map((h) => ({ id: h.id, label: h.label ?? h.id, kind: h.kind ?? 'fest' })),
     pbs: { id: s.pbsHostId, label: label(s.pbsHostId), reachable: !!db.getHostState(s.pbsHostId)?.reachable, rightShutdown: engine.hostRights(s.pbsHostId).includes('herunterfahren') },
     hosts: o.order(s).map((id) => ({ id, label: label(id), right: engine.hostRights(id).includes('backup-starten'), reachable: !!db.getHostState(id)?.reachable, ...o.selection(id, s),

@@ -27,6 +27,7 @@ async function setup({ allDays = true } = {}) {
   const calls = (id) => (world.state.get(id).snapCalls ?? []).filter((c) => /^(backup-start|poweroff)/.test(c));
   // Die meisten Tests laufen an einem Dienstag: dafür alle Tage als Backup-Tage. Die Voreinstellung (nur Montag) prüft ein eigener Test.
   if (allDays) engine.orch.save({ backupDays: [0, 1, 2, 3, 4, 5, 6] });
+  await engine.orch.tick(); // das Tool läuft schon: der aktuelle Boot des PBS gilt als erledigt
   return { world, db, engine, notifier, mails, advance, bootPbs, calls, o: engine.orch };
 }
 
@@ -35,7 +36,7 @@ test('Einstellungen: nur gültige Werte', () => {
   assert.throws(() => cleanBackupSettings({ storage: 'pbs; id' }, ids), /Speicher/);
   assert.throws(() => cleanBackupSettings({ waitAfterBootMin: 999 }, ids), /Wartezeit/);
   assert.throws(() => cleanBackupSettings({ pbsHostId: 'x' }, ids), /unbekannt/);
-  assert.throws(() => cleanBackupSettings({ mode: 'quatsch' }, ids), /Betriebsart/);
+  assert.throws(() => cleanBackupSettings({ wakeTime: '25:00' }, ids), /Uhrzeit/);
   assert.throws(() => cleanBackupSettings({ hosts: { nope: { select: 'all' } } }, ids), /Host unbekannt/);
   assert.throws(() => cleanBackupSettings({ hosts: { pve: { select: 'exclude', ids: ['a'] } } }, ids), /Gast-IDs/);
   assert.throws(() => cleanBackupSettings({ hosts: { pve: { select: 'only', ids: [] } } }, ids), /mindestens einen/);
@@ -53,16 +54,8 @@ test('Voreinstellung wie im alten Orchestrator: router alle, pve alle außer der
   assert.deepEqual(o.selection('pve').ids, [109, 112, 113, 114, 116, 119, 117, 159, 161, 171]);
 });
 
-test('Betriebsart „beobachten“: das Tool startet nichts, auch nicht bei frisch gestartetem PBS', async () => {
-  const { o, bootPbs, calls } = await setup();
-  await bootPbs(); await o.tick();
-  assert.equal(o.job(), null);
-  assert.deepEqual(calls('router'), []);
-});
-
-test('Beim Einschalten von „steuern“ startet nicht sofort ein Lauf (aktueller Boot gilt als erledigt)', async () => {
+test('Nach dem Update startet nicht sofort ein Lauf (ein schon laufender Boot gilt als erledigt)', async () => {
   const { o, advance, calls } = await setup();
-  o.save({ mode: 'steuern' });
   await advance(30); await o.tick();
   assert.equal(o.job(), null);
   assert.deepEqual(calls('router'), []);
@@ -70,7 +63,6 @@ test('Beim Einschalten von „steuern“ startet nicht sofort ein Lauf (aktuelle
 
 test('Voller Lauf: erst router, dann pve, danach fährt der PBS herunter', async () => {
   const { o, advance, bootPbs, calls, world, mails } = await setup();
-  o.save({ mode: 'steuern' });
   await bootPbs(19); await o.tick();
   assert.equal(o.job(), null, 'Wartezeit nach dem Hochfahren (20 min) noch nicht um');
   await advance(2); await o.tick();
@@ -98,7 +90,6 @@ test('Voller Lauf: erst router, dann pve, danach fährt der PBS herunter', async
 test('Fehlgeschlagener Gast: PBS bleibt an, Mail mit Ursache', async () => {
   const { o, advance, bootPbs, calls, world, mails } = await setup();
   world.state.get('router').vzFail = 112;
-  o.save({ mode: 'steuern' });
   await bootPbs(); await o.tick();
   await advance(31); await o.tick(); await advance(31); await o.tick();
   const job = o.job();
@@ -118,7 +109,7 @@ test('Fehlgeschlagener Gast: PBS bleibt an, Mail mit Ursache', async () => {
 test('Speicher nicht aktiv oder Host nicht erreichbar: nach der Wartezeit wird der Host übersprungen, PBS bleibt an', async () => {
   const { o, advance, bootPbs, calls, world } = await setup();
   world.state.get('pve').storageDown = true;
-  o.save({ mode: 'steuern', hostWaitMin: 10 });
+  o.save({ hostWaitMin: 10 });
   await bootPbs(); await o.tick();
   await advance(31); await o.tick();   // router fertig, pve wartet auf den Speicher
   assert.equal(o.job().hosts.find((h) => h.id === 'pve').state, 'wartet');
@@ -133,7 +124,6 @@ test('Speicher nicht aktiv oder Host nicht erreichbar: nach der Wartezeit wird d
 test('Läuft schon ein vzdump (z. B. vom alten Skript), wird er übernommen statt doppelt gestartet', async () => {
   const { o, engine, bootPbs, calls } = await setup();
   await engine.client('router').backupStart('pbs', { select: 'all', ids: [] }); // „alter Orchestrator“
-  o.save({ mode: 'steuern' });
   await bootPbs(); await o.tick();
   const r = o.job().hosts.find((h) => h.id === 'router');
   assert.equal(r.state, 'läuft');
@@ -145,7 +135,6 @@ test('Ohne Recht „Backups starten“ gibt es einen Fehler statt eines Starts; 
   const { o, advance, bootPbs, calls, world, engine } = await setup();
   world.rights = new Map([['router', ['backup-starten']], ['pve', ['snapshots']], ['pbs', []]]);
   for (const h of world.hosts) await engine.pollHost(h.id);
-  o.save({ mode: 'steuern' });
   await bootPbs(); await o.tick();
   assert.equal(o.job().hosts.find((h) => h.id === 'pve').state, 'wartet');
   await advance(31); await o.tick();
@@ -163,7 +152,6 @@ test('Ohne Recht „Backups starten“ gibt es einen Fehler statt eines Starts; 
 
 test('Während ein Backup auf dem Host läuft, startet das Tool keine Platten-Tests', async () => {
   const { o, engine, bootPbs } = await setup();
-  o.save({ mode: 'steuern' });
   assert.equal(engine.buildState('router').backupBusy, false);
   await bootPbs(); await o.tick();
   assert.equal(engine.buildState('router').backupBusy, true);
@@ -181,7 +169,7 @@ test('Trockenlauf zeigt Auswahl und Probleme, startet aber nichts; Abbrechen bee
   assert.match(pve.command, /--exclude 109,112,113/);
   assert.ok(plan.problems.some((p) => /Speicher/.test(p)), plan.problems.join('|'));
   assert.deepEqual(calls('router'), []); assert.deepEqual(calls('pve'), []);
-  o.save({ mode: 'steuern' }); await bootPbs(); await o.tick();
+  await bootPbs(); await o.tick();
   o.abort();
   assert.equal(o.job().phase, 'abgebrochen');
   assert.throws(() => o.abort(), /kein Backup-Lauf/);
@@ -201,7 +189,6 @@ test('Von Hand starten: nur bei erreichbarem PBS und nie doppelt', async () => {
 test('Backup-Tage: Voreinstellung Montag; an anderen Tagen wird nicht gesichert, der PBS bleibt an, „Jetzt Backup starten“ geht weiter', async () => {
   const { o, bootPbs, calls, world, db } = await setup({ allDays: false }); // Dienstag, 3.11.2026
   assert.deepEqual(o.settings().backupDays, [1]);
-  o.save({ mode: 'steuern' });
   await bootPbs(); await o.tick();
   assert.equal(o.job(), null, 'kein Lauf an einem Dienstag');
   assert.deepEqual(calls('router'), []); assert.deepEqual(calls('pbs'), []);
@@ -218,7 +205,7 @@ test('Backup-Tage sind einstellbar, ungültige Tage werden abgelehnt', async () 
   const { o, bootPbs, calls } = await setup({ allDays: false });
   assert.throws(() => o.save({ backupDays: [7] }), /Backup-Tage/);
   assert.throws(() => o.save({ backupDays: 'mo' }), /Backup-Tage/);
-  o.save({ mode: 'steuern', backupDays: [2, 2, 1] });
+  o.save({ backupDays: [2, 2, 1] });
   assert.deepEqual(o.settings().backupDays, [1, 2]);
   await bootPbs(); await o.tick();
   assert.equal(o.job().phase, 'läuft', 'Dienstag ist jetzt Backup-Tag');
@@ -227,7 +214,6 @@ test('Backup-Tage sind einstellbar, ungültige Tage werden abgelehnt', async () 
 
 test('Lauf von Hand: nur die ausgewählten Gäste, danach nie herunterfahren (auch an einem Backup-Tag)', async () => {
   const { o, advance, calls } = await setup(); // alle Tage sind Backup-Tage
-  o.save({ mode: 'steuern' });
   await o.startNow(PICK);
   assert.deepEqual(calls('router'), ['backup-start pbs only 109,112']);
   await advance(31); await o.tick();
@@ -252,7 +238,7 @@ test('Lauf von Hand: Auswahl wird geprüft, nur gewählte Hosts laufen', async (
 
 test('Kein Backup-Tag: auch der geplante Lauf fährt nicht herunter; ein Lauf von Hand verhindert den geplanten nicht', async () => {
   const { o, advance, bootPbs, calls } = await setup({ allDays: false }); // Dienstag
-  o.save({ mode: 'steuern', backupDays: [2] });
+  o.save({ backupDays: [2] });
   await bootPbs(5); // Wartezeit (20 min) noch nicht um
   await o.startNow({ router: [109] }); await advance(31); await o.tick();
   assert.equal(o.lastJob().shutdown, 'von-hand');
@@ -282,6 +268,38 @@ test('PBS einschalten (Wake-on-LAN) und von Hand herunterfahren', async () => {
   assert.throws(() => o.save({ wolMac: 'aa:bb' }), /MAC/);
   assert.throws(() => o.save({ wolBroadcast: '999.1.1.1' }), /Broadcast/);
   world.setUp('pbs', true); await engine.pollHost('pbs');
-  o.save({ mode: 'steuern' }); await o.startNow(PICK);
+  await o.startNow(PICK);
   await assert.rejects(() => o.powerOff(), /Backup-Lauf/);
+});
+
+test('Automatisch einschalten an Backup-Tagen: ab der Uhrzeit, bis zu drei Versuche, nicht nachdem der PBS heute schon lief', async () => {
+  // Sonntagabend läuft der PBS noch (wird gelernt), dann ist er aus; Montag ab 07:50
+  let t = new Date(2026, 10, 1, 20, 0).getTime();
+  const clock = () => new Date(t);
+  const world = new DemoWorld(clock, { testMinutes: 10 }); world.pbsGate = 99;
+  const db = openDb(null);
+  const engine = new Engine({ db, hosts: world.hosts, now: clock, makeClient: (h) => new HostClient(new DemoTransport(world, h.id)) });
+  for (const h of world.hosts) await engine.pollHost(h.id);
+  const o = engine.orch, sent = [];
+  o.sendWol = async (mac) => { sent.push([new Date(t).toTimeString().slice(0, 5), mac]); return { packets: 3, targets: ['x'] }; };
+  await o.tick(); // lernt die MAC-Adresse, markiert den laufenden Boot
+  world.setUp('pbs', false); await engine.pollHost('pbs');
+  t = new Date(2026, 10, 2, 7, 50).getTime();
+  const step = async (min) => { t += min * 60000; await engine.pollHost('pbs'); await o.tick(); };
+  await step(5); assert.equal(sent.length, 0, '07:55: noch vor 08:00');
+  await step(6); assert.deepEqual(sent.map((x) => x[0]), ['08:01']);
+  await step(5); assert.equal(sent.length, 1, 'erst nach 10 Minuten erneut');
+  await step(6); await step(11); assert.equal(sent.length, 3);
+  await step(11); await step(11); assert.equal(sent.length, 3, 'höchstens drei Versuche');
+  assert.ok(db.events(20).some((e) => /nach drei Wake-on-LAN-Versuchen/.test(e.text)));
+  // Dienstag: kein Backup-Tag, nichts
+  t = new Date(2026, 10, 3, 8, 30).getTime(); await o.tick(); assert.equal(sent.length, 3);
+  // Montag darauf: PBS fährt nach dem ersten Paket hoch, danach (Lauf, Herunterfahren) kein neues Einschalten am selben Tag
+  t = new Date(2026, 10, 9, 8, 5).getTime(); await o.tick(); assert.equal(sent.length, 4);
+  world.setUp('pbs', true); await engine.pollHost('pbs'); t += 25 * 60000; await engine.pollHost('pbs'); await o.tick();
+  assert.equal(o.job()?.phase, 'läuft');
+  o.abort(); world.setUp('pbs', false); await engine.pollHost('pbs');
+  t += 30 * 60000; await o.tick(); assert.equal(sent.length, 4, 'heute lief er schon: nicht wieder einschalten');
+  o.save({ autoWake: false });
+  t = new Date(2026, 10, 16, 8, 5).getTime(); await o.tick(); assert.equal(sent.length, 4, 'ausgeschaltet');
 });

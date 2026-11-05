@@ -8,12 +8,12 @@ import { summarizeRun } from './backups.js';
 import { sendWol, macFromArp, normMac, MAC_RE } from './wol.js';
 
 const MIN = 60000;
-const SETTINGS_KEY = 'backupctl', JOB_KEY = 'backupjob', LAST_KEY = 'backupjob_last', BOOT_KEY = 'backup_lastboot', SKIP_KEY = 'backup_lastskip';
+const SETTINGS_KEY = 'backupctl', JOB_KEY = 'backupjob', LAST_KEY = 'backupjob_last', BOOT_KEY = 'backup_lastboot', SKIP_KEY = 'backup_lastskip', SINCE_KEY = 'backup_steuert_seit', WAKE_KEY = 'backup_wake';
 // Voreinstellung aus dem bisherigen Orchestrator (pbs-run-backups.sh): router alle, pve alle außer dieser Gäste.
 const SEEDED_EXCLUDES = { pve: [109, 112, 113, 114, 116, 119, 117, 159, 161, 171] };
 // Backup-Tage: 0 = Sonntag … 6 = Samstag. Voreinstellung Montag, wie bisher (der PBS geht montags automatisch an).
 export const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
-export const DEFAULTS = { mode: 'beobachten', pbsHostId: '', storage: 'pbs', backupDays: [1], wolMac: '', wolBroadcast: '255.255.255.255', waitAfterBootMin: 20, shutdown: true, hostWaitMin: 30, order: null, hosts: {} };
+export const DEFAULTS = { pbsHostId: '', storage: 'pbs', backupDays: [1], autoWake: true, wakeTime: '08:00', wolMac: '', wolBroadcast: '255.255.255.255', waitAfterBootMin: 20, shutdown: true, hostWaitMin: 30, order: null, hosts: {} };
 
 const FINAL = new Set(['ok', 'fehler', 'fehlt', 'übersprungen']);
 
@@ -21,7 +21,8 @@ const FINAL = new Set(['ok', 'fehler', 'fehlt', 'übersprungen']);
 export function cleanBackupSettings(input, hostIds = []) {
   const out = {};
   const int = (v, lo, hi, name) => { const n = Number(v); if (!Number.isInteger(n) || n < lo || n > hi) throw new Error(`${name}: erlaubt sind ${lo} bis ${hi}`); return n; };
-  if ('mode' in input) { if (!['beobachten', 'steuern'].includes(input.mode)) throw new Error('Betriebsart: ungültig'); out.mode = input.mode; }
+  if ('autoWake' in input) out.autoWake = !!input.autoWake;
+  if ('wakeTime' in input) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(input.wakeTime))) throw new Error('Uhrzeit zum Einschalten: Format HH:MM'); out.wakeTime = String(input.wakeTime); }
   if ('pbsHostId' in input) { const v = String(input.pbsHostId ?? ''); if (v && !hostIds.includes(v)) throw new Error('PBS-Host unbekannt'); out.pbsHostId = v; }
   if ('storage' in input) { const v = String(input.storage ?? '').trim(); if (!/^[A-Za-z0-9_-]{1,32}$/.test(v)) throw new Error('Speicher: nur Buchstaben, Ziffern, - und _ (höchstens 32 Zeichen)'); out.storage = v; }
   if ('waitAfterBootMin' in input) out.waitAfterBootMin = int(input.waitAfterBootMin, 0, 240, 'Wartezeit nach dem Hochfahren (Minuten)');
@@ -86,9 +87,6 @@ export class Orchestrator {
     const prev = this.settings();
     const next = { ...prev, ...clean, hosts: { ...(prev.hosts ?? {}), ...(clean.hosts ?? {}) } };
     this.db.setSetting(SETTINGS_KEY, JSON.stringify(next));
-    // Beim Einschalten von „steuern“ gilt der aktuell laufende Boot des PBS als erledigt: Es startet nicht sofort ein Lauf.
-    if (clean.mode === 'steuern' && prev.mode !== 'steuern') this.markCurrentBoot(next);
-    if (clean.mode && clean.mode !== prev.mode) this.engine.event(null, null, clean.mode === 'steuern' ? 'Backups: das Tool steuert die Backup-Läufe' : 'Backups: das Tool beobachtet nur');
     return this.settings();
   }
   bootAt(s) {
@@ -111,12 +109,13 @@ export class Orchestrator {
     this.running = true;
     try {
       await this.learnNet(s);
-      if (s.mode !== 'steuern') return;
+      // Beim ersten Start dieser Version gilt ein gerade laufender Boot des PBS als erledigt: nach einem Update startet nicht sofort ein Lauf.
+      if (!this.db.getSetting(SINCE_KEY)) { this.markCurrentBoot(s); this.db.setSetting(SINCE_KEY, String(this.now().getTime())); }
       const job = this.job();
       if (job?.phase === 'läuft') { await this.advance(job, s); return; }
       if (!s.pbsHostId) return;
       const boot = this.bootAt(s);
-      if (boot == null) return;
+      if (boot == null) { await this.autoWake(s); await this.wakeFailedCheck(s); return; }
       const hs = this.db.getHostState(s.pbsHostId);
       const up = (hs.uptimeSec + (this.now() - hs.uptimeAt) / 1000) / 60;
       if (up < s.waitAfterBootMin) return;
@@ -282,6 +281,41 @@ export class Orchestrator {
     if (!info.mac && host?.address) { const m = this.readArp(host.address); if (m) info = { ...info, mac: m, source: 'arp' }; }
     this.db.setSetting('pbs_netinfo', JSON.stringify({ ...info, ts: this.now().getTime() }));
   }
+  /**
+   * Automatisch einschalten: an einem Backup-Tag ab der eingestellten Uhrzeit, wenn der PBS aus ist und heute noch nicht lief.
+   * Bis zu drei Versuche im Abstand von 10 Minuten; klappt es nicht, Ereignis und Mail.
+   */
+  async autoWake(s) {
+    if (!s.autoWake || !s.pbsHostId) return;
+    const now = this.now(), day = now.getDay();
+    if (!s.backupDays.includes(day)) return;
+    const [hh, mm] = s.wakeTime.split(':').map(Number);
+    const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0).getTime();
+    if (now.getTime() < at || now.getTime() > at + 6 * 3600e3) return; // nur in den 6 Stunden nach der Uhrzeit
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    // Lief der PBS heute schon (Boot heute oder ein Lauf heute)? Dann nicht wieder einschalten, z. B. nach dem Herunterfahren am Mittag.
+    const lastBoot = Number(this.db.getSetting(BOOT_KEY) ?? 0), last = this.lastJob();
+    if (lastBoot >= today || (last && last.startedAt >= today && !last.manual)) return;
+    const st = this.parse(WAKE_KEY, null);
+    const tries = st?.day === today ? st.tries : 0;
+    if (tries >= 3) return;
+    if (st?.day === today && now.getTime() - st.ts < 10 * MIN) return;
+    const target = this.wolTarget(s);
+    if (!target.mac) { if (tries === 0) { this.db.setSetting(WAKE_KEY, JSON.stringify({ day: today, tries: 3, ts: now.getTime() })); this.engine.event(s.pbsHostId, null, 'Automatisches Einschalten nicht möglich: MAC-Adresse des PBS unbekannt.'); } return; }
+    try { await this.sendWol(target.mac, { broadcast: target.broadcast }); } catch (e) { this.engine.log(`Wake-on-LAN: ${e.message}`); }
+    this.db.setSetting(WAKE_KEY, JSON.stringify({ day: today, tries: tries + 1, ts: now.getTime() }));
+    this.engine.event(s.pbsHostId, null, `Backup-Tag: PBS per Wake-on-LAN eingeschaltet (Versuch ${tries + 1} von 3)`);
+    if (tries + 1 === 3) this.wakeCheckAt = now.getTime() + 10 * MIN;
+  }
+  /** Nach dem dritten Versuch: läuft er immer noch nicht, Meldung (einmal). */
+  async wakeFailedCheck(s) {
+    if (!this.wakeCheckAt || this.now().getTime() < this.wakeCheckAt) return;
+    this.wakeCheckAt = null;
+    if (this.db.getHostState(s.pbsHostId)?.reachable) return;
+    this.engine.event(s.pbsHostId, null, 'PBS ist nach drei Wake-on-LAN-Versuchen nicht hochgefahren. Heute läuft kein Backup.');
+    try { await this.engine.notifier?.backupNotice(`wake:${new Date().toDateString()}`, '[Backup] PBS ließ sich nicht einschalten', 'Der PBS ist an einem Backup-Tag nach drei Wake-on-LAN-Versuchen nicht hochgefahren. Heute läuft kein Backup.\nBitte Wake-on-LAN im BIOS und an der Netzwerkkarte prüfen oder den PBS von Hand einschalten.'); } catch { /* egal */ }
+  }
+
   /** MAC-Adresse für Wake-on-LAN: von Hand eingetragen oder gelernt. */
   wolTarget(s = this.settings()) {
     const learned = this.parse('pbs_netinfo', null);
