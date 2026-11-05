@@ -22,6 +22,7 @@
 #   tasklog <UPID>               Protokoll einer vzdump-Aufgabe (JSON)
 #   autosnap                     Zustand der Snapshot-Skripte (Schalter, Aufbewahrung, Cron, letzte Meldungen)
 #   rechte                       Welche Rechtegruppen für dieses Skript freigegeben sind (Datei /etc/diskmon/rechte)
+#   netinfo                      Netzwerkkarte für Wake-on-LAN: Name, MAC-Adresse, Wake-on-Zustand (nur lesend)
 #   kernel                       Kernel-Meldungen der letzten 48 h zu SATA/NVMe-Verbindungsfehlern (nur ausgewählte Zeilen)
 # Schreibende Befehle, nur wenn die Rechtegruppe "snapshots" bei der Einrichtung freigegeben wurde (mit dem root-Passwort):
 #   snap-run hourly|weekly|monthly [force]   startet den vorhandenen /usr/local/sbin/autosnap-run mit dieser Bezeichnung
@@ -39,7 +40,7 @@
 set -euo pipefail
 
 # Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
-GATE_VERSION=8
+GATE_VERSION=9
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
@@ -127,6 +128,18 @@ case "${a[0]}" in
     echo "== cron"; cat /etc/cron.d/proxmox-autosnap 2>/dev/null || true
     echo "== conf"; cat /etc/autosnap.conf 2>/dev/null || true
     echo "== log"; journalctl -t autosnap -n 40 --no-pager -o short-iso 2>/dev/null || true ;;
+  netinfo)
+    [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
+    command -v ip >/dev/null 2>&1 || exit 0
+    dev="$( { ip -o route show default 2>/dev/null || true; } | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -n1 || true)"
+    [[ -n "$dev" ]] || exit 0
+    phys="$dev"
+    # Bei einer Bridge (vmbr0) die erste echte Netzwerkkarte darunter nehmen: Wake-on-LAN hängt an der Karte.
+    if [[ -d "/sys/class/net/$dev/brif" ]]; then
+      for p in /sys/class/net/"$dev"/brif/*; do p="${p##*/}"; if [[ -e "/sys/class/net/$p/device" ]]; then phys="$p"; break; fi; done
+    fi
+    echo "dev=$dev"; echo "phys=$phys"; echo "mac=$(cat "/sys/class/net/$phys/address" 2>/dev/null)"
+    if command -v ethtool >/dev/null 2>&1; then echo "wol=$(ethtool "$phys" 2>/dev/null | sed -n 's/^[[:space:]]*Wake-on:[[:space:]]*//p' | head -n1)"; fi ;;
   rechte)
     [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
     cat "$RECHTE" 2>/dev/null || true ;;

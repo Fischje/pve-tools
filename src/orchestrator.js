@@ -5,6 +5,7 @@
 // Der PBS wird nur heruntergefahren, wenn ALLE Backups erfolgreich waren (einstellbar). Sonst bleibt er an, und es kommt eine Mail.
 // Zustand und Einstellungen stehen in der Datenbank (Tabelle setting), damit ein Neustart des Tools den Lauf nicht verliert.
 import { summarizeRun } from './backups.js';
+import { sendWol, macFromArp, normMac, MAC_RE } from './wol.js';
 
 const MIN = 60000;
 const SETTINGS_KEY = 'backupctl', JOB_KEY = 'backupjob', LAST_KEY = 'backupjob_last', BOOT_KEY = 'backup_lastboot', SKIP_KEY = 'backup_lastskip';
@@ -12,7 +13,7 @@ const SETTINGS_KEY = 'backupctl', JOB_KEY = 'backupjob', LAST_KEY = 'backupjob_l
 const SEEDED_EXCLUDES = { pve: [109, 112, 113, 114, 116, 119, 117, 159, 161, 171] };
 // Backup-Tage: 0 = Sonntag … 6 = Samstag. Voreinstellung Montag, wie bisher (der PBS geht montags automatisch an).
 export const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
-export const DEFAULTS = { mode: 'beobachten', pbsHostId: '', storage: 'pbs', backupDays: [1], waitAfterBootMin: 20, shutdown: true, hostWaitMin: 30, order: null, hosts: {} };
+export const DEFAULTS = { mode: 'beobachten', pbsHostId: '', storage: 'pbs', backupDays: [1], wolMac: '', wolBroadcast: '255.255.255.255', waitAfterBootMin: 20, shutdown: true, hostWaitMin: 30, order: null, hosts: {} };
 
 const FINAL = new Set(['ok', 'fehler', 'fehlt', 'übersprungen']);
 
@@ -26,6 +27,12 @@ export function cleanBackupSettings(input, hostIds = []) {
   if ('waitAfterBootMin' in input) out.waitAfterBootMin = int(input.waitAfterBootMin, 0, 240, 'Wartezeit nach dem Hochfahren (Minuten)');
   if ('hostWaitMin' in input) out.hostWaitMin = int(input.hostWaitMin, 1, 240, 'Wartezeit auf einen Host (Minuten)');
   if ('shutdown' in input) out.shutdown = !!input.shutdown;
+  if ('wolMac' in input) { const m = normMac(input.wolMac); if (m && !MAC_RE.test(m)) throw new Error('MAC-Adresse des PBS: Format aa:bb:cc:dd:ee:ff'); out.wolMac = m; }
+  if ('wolBroadcast' in input) {
+    const v = String(input.wolBroadcast ?? '').trim() || '255.255.255.255';
+    if (!v.split(/[,\s]+/).every((x) => /^(\d{1,3}\.){3}\d{1,3}$/.test(x) && x.split('.').every((n) => Number(n) <= 255))) throw new Error('Broadcast-Adresse: z. B. 255.255.255.255 oder 192.168.1.255');
+    out.wolBroadcast = v;
+  }
   if ('backupDays' in input) {
     if (!Array.isArray(input.backupDays) || input.backupDays.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) throw new Error('Backup-Tage: ungültig');
     out.backupDays = [...new Set(input.backupDays)].sort((a, b) => a - b);
@@ -51,7 +58,7 @@ export function cleanBackupSettings(input, hostIds = []) {
 }
 
 export class Orchestrator {
-  constructor(engine) { this.engine = engine; this.running = false; }
+  constructor(engine) { this.engine = engine; this.running = false; this.sendWol = sendWol; this.readArp = (ip) => macFromArp(ip); }
   get db() { return this.engine.db; }
   now() { return this.engine.now(); }
   parse(key, d) { try { return JSON.parse(this.db.getSetting(key) ?? 'null') ?? d; } catch { return d; } }
@@ -100,9 +107,11 @@ export class Orchestrator {
   /** Läuft jede Minute (aus dem Takt der Engine). */
   async tick() {
     const s = this.settings();
-    if (s.mode !== 'steuern' || this.running) return;
+    if (this.running) return;
     this.running = true;
     try {
+      await this.learnNet(s);
+      if (s.mode !== 'steuern') return;
       const job = this.job();
       if (job?.phase === 'läuft') { await this.advance(job, s); return; }
       if (!s.pbsHostId) return;
@@ -221,7 +230,11 @@ export class Orchestrator {
     job.phase = allOk ? 'fertig' : 'fehler';
     job.endedAt = this.now().getTime();
     job.shutdown = 'nein';
-    if (allOk && s.shutdown && s.pbsHostId) {
+    // Heruntergefahren wird nur, wenn der PBS an einem Backup-Tag hochgefahren ist. Sonst bleibt er an, bis du ihn ausschaltest
+    // (Knopf „PBS herunterfahren“). Das gilt auch für einen von Hand gestarteten Lauf.
+    const bootDay = new Date(job.bootAt ?? job.startedAt).getDay();
+    if (allOk && s.shutdown && !s.backupDays.includes(bootDay)) job.shutdown = 'kein-backup-tag';
+    else if (allOk && s.shutdown && s.pbsHostId) {
       try {
         if (!this.engine.hostRights(s.pbsHostId).includes('herunterfahren')) job.shutdown = 'fehlt-recht';
         else { await this.engine.client(s.pbsHostId).poweroff(); job.shutdown = 'angefordert'; }
@@ -230,6 +243,47 @@ export class Orchestrator {
     this.saveJob(job); this.db.setSetting(LAST_KEY, JSON.stringify(job));
     this.engine.event(null, null, allOk ? `Backup-Lauf fertig${job.shutdown === 'angefordert' ? ', PBS wird heruntergefahren' : ', PBS bleibt an'}` : 'Backup-Lauf nicht vollständig erfolgreich: der PBS bleibt an');
     try { await this.engine.notifier?.backupJob(job, s); } catch (e) { this.engine.log(`Mail zum Backup-Lauf: ${e.message}`); }
+  }
+
+  /**
+   * MAC-Adresse und Wake-on-Zustand des PBS lernen, solange er läuft (höchstens stündlich): aus dem Prüfskript (ab Version 9),
+   * sonst aus der ARP-Tabelle des LXC. Eine von Hand eingetragene MAC-Adresse bleibt unangetastet.
+   */
+  async learnNet(s) {
+    if (!s.pbsHostId) return;
+    const hs = this.db.getHostState(s.pbsHostId);
+    if (!hs?.reachable) return;
+    const last = this.parse('pbs_netinfo', null);
+    if (last && this.now().getTime() - last.ts < 3600e3) return;
+    const host = this.engine.hosts.find((h) => h.id === s.pbsHostId);
+    let info = {};
+    if ((hs.gateVersion ?? 0) >= 9) { try { info = await this.engine.client(s.pbsHostId).netinfo(); } catch { /* egal */ } }
+    if (!info.mac && host?.address) { const m = this.readArp(host.address); if (m) info = { ...info, mac: m, source: 'arp' }; }
+    this.db.setSetting('pbs_netinfo', JSON.stringify({ ...info, ts: this.now().getTime() }));
+  }
+  /** MAC-Adresse für Wake-on-LAN: von Hand eingetragen oder gelernt. */
+  wolTarget(s = this.settings()) {
+    const learned = this.parse('pbs_netinfo', null);
+    return { mac: s.wolMac || learned?.mac || '', manual: !!s.wolMac, learned, broadcast: s.wolBroadcast };
+  }
+  /** PBS einschalten (Magic Packet). */
+  async wake() {
+    const s = this.settings(), t = this.wolTarget(s);
+    if (!t.mac) throw new Error('Die MAC-Adresse des PBS ist noch nicht bekannt. Sie wird gelernt, sobald der PBS einmal läuft, oder du trägst sie in den Einstellungen ein.');
+    if (this.db.getHostState(s.pbsHostId)?.reachable) throw new Error('Der PBS läuft schon.');
+    const r = await this.sendWol(t.mac, { broadcast: t.broadcast });
+    this.engine.event(s.pbsHostId, null, `Einschalten per Wake-on-LAN angefordert (${t.mac}, ${r.packets} Pakete an ${r.targets.join(', ')})`);
+    return r;
+  }
+  /** PBS von Hand herunterfahren. Nicht, solange das Tool gerade ein Backup steuert. */
+  async powerOff() {
+    const s = this.settings();
+    if (!s.pbsHostId) throw new Error('Kein PBS-Host festgelegt.');
+    if (this.job()?.phase === 'läuft') throw new Error('Es läuft gerade ein Backup-Lauf. Erst abwarten oder „Im Tool abbrechen“.');
+    if (!this.db.getHostState(s.pbsHostId)?.reachable) throw new Error('Der PBS ist nicht erreichbar (schon aus?).');
+    if (!this.engine.hostRights(s.pbsHostId).includes('herunterfahren')) throw new Error('Auf dem PBS ist das Recht „Herunterfahren“ nicht freigegeben (Reiter Hosts einrichten, Skript aktualisieren).');
+    await this.engine.client(s.pbsHostId).poweroff();
+    this.engine.event(s.pbsHostId, null, 'PBS wird von Hand heruntergefahren (in 20 Sekunden)');
   }
 
   /** Trockenlauf: was würde gestartet? Startet nichts. */

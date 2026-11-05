@@ -222,3 +222,36 @@ test('Backup-Tage sind einstellbar, ungültige Tage werden abgelehnt', async () 
   assert.equal(o.job().phase, 'läuft', 'Dienstag ist jetzt Backup-Tag');
   assert.deepEqual(calls('router'), ['backup-start pbs all']);
 });
+
+test('Kein Backup-Tag: auch ein von Hand gestarteter Lauf fährt den PBS danach nicht herunter', async () => {
+  const { o, advance, calls } = await setup({ allDays: false }); // Dienstag
+  o.save({ mode: 'steuern' });
+  await o.startNow(); await advance(31); await o.tick(); await advance(31); await o.tick();
+  const job = o.job();
+  assert.equal(job.phase, 'fertig');
+  assert.equal(job.shutdown, 'kein-backup-tag');
+  assert.deepEqual(calls('pbs'), []);
+});
+
+test('PBS einschalten (Wake-on-LAN) und von Hand herunterfahren', async () => {
+  const { o, engine, world, calls } = await setup();
+  const sent = [];
+  o.sendWol = async (mac, opt) => { sent.push([mac, opt.broadcast]); return { packets: 3, targets: [opt.broadcast] }; };
+  await o.tick(); // lernt die MAC-Adresse über das Prüfskript (netinfo)
+  assert.equal(o.wolTarget().mac, 'a8:a1:59:12:34:56');
+  await assert.rejects(() => o.wake(), /läuft schon/);
+  await o.powerOff();
+  assert.deepEqual(calls('pbs'), ['poweroff']);
+  await engine.pollHost('pbs');
+  await assert.rejects(() => o.powerOff(), /nicht erreichbar/);
+  await o.wake();
+  assert.deepEqual(sent, [['a8:a1:59:12:34:56', '255.255.255.255']]);
+  o.save({ wolMac: 'AA-BB-CC-DD-EE-FF', wolBroadcast: '192.168.1.255' });
+  await o.wake();
+  assert.deepEqual(sent.at(-1), ['aa:bb:cc:dd:ee:ff', '192.168.1.255'], 'von Hand eingetragene Adresse hat Vorrang');
+  assert.throws(() => o.save({ wolMac: 'aa:bb' }), /MAC/);
+  assert.throws(() => o.save({ wolBroadcast: '999.1.1.1' }), /Broadcast/);
+  world.setUp('pbs', true); await engine.pollHost('pbs');
+  o.save({ mode: 'steuern' }); await o.startNow();
+  await assert.rejects(() => o.powerOff(), /Backup-Lauf/);
+});

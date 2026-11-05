@@ -95,3 +95,8 @@ test('rechte: leer, wenn nichts freigegeben ist', () => {
   assert.equal(run('rechte').out, '');
   assert.equal(run('rechte x').code, 64);
 });
+
+test('netinfo: nur lesend, ohne Argumente', () => {
+  assert.equal(run('netinfo x').code, 64);
+  assert.equal(run('netinfo').code, 0);
+});

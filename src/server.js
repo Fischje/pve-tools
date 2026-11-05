@@ -115,6 +115,8 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
         else if (b.action === 'dryrun') return send(res, 200, { ok: true, plan: await engine.orch.dryRun() });
         else if (b.action === 'start') await engine.orch.startNow();
         else if (b.action === 'abort') engine.orch.abort();
+        else if (b.action === 'wake') await engine.orch.wake();
+        else if (b.action === 'poweroff') await engine.orch.powerOff();
         else throw new Error('Unbekannte Aktion');
       } catch (e) { return send(res, 400, { error: e.message }); }
       return send(res, 200, { ok: true });
@@ -217,7 +219,7 @@ async function main() {
   const db = openDb(dataDir);
   const demo = env.DEMO === '1';
   const log = (m) => console.log(`${new Date().toISOString()} ${m}`);
-  let hosts, makeClient, now = () => new Date(), tickMs = 60000;
+  let hosts, makeClient, now = () => new Date(), tickMs = 60000, demoWorld = null;
 
   if (demo) {
     const { DemoWorld, DemoTransport } = await import('./demo/world.js');
@@ -227,6 +229,7 @@ async function main() {
     now = () => new Date(startVirtual.getTime() + (Date.now() - t0) * speed);
     const world = new DemoWorld(now, { testMinutes: 5 });
     hosts = world.hosts; makeClient = (h) => new HostClient(new DemoTransport(world, h.id));
+    demoWorld = world;
     tickMs = 60000 / speed;
     log(`DEMO-Modus: virtuelle Zeit startet ${startVirtual.toString()}, ${speed}-fache Geschwindigkeit`);
   } else {
@@ -238,6 +241,8 @@ async function main() {
   }
 
   const engine = new Engine({ db, hosts, makeClient, now, log });
+  // Demo: kein echtes Magic Packet ins Netz, der PBS „wacht“ nach einer Minute virtueller Zeit auf.
+  if (demoWorld) engine.orch.sendWol = async () => { const pbs = hosts.find((h) => h.kind === 'manuell')?.id; setTimeout(() => pbs && demoWorld.setUp(pbs, true), 60000 / Number(env.DEMO_SPEED ?? 60)); return { packets: 3, targets: ['255.255.255.255 (Demo)'] }; };
   if (demo) {
     const { seedDemo } = await import('./demo/seed.js');
     for (const h of hosts) await engine.pollHost(h.id);

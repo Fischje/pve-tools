@@ -2,6 +2,7 @@
 import { normalize } from './smart.js';
 import { parseZpoolStatus, parseZpoolList } from './zfs.js';
 import { parseKernelLog } from './kernel.js';
+import { parseNetinfo } from './wol.js';
 import { parseGuests, parseSnapshots, parseTasks, parseVzdumpLog, parseAutosnap } from './backups.js';
 
 export class HostClient {
@@ -89,6 +90,8 @@ export class HostClient {
     const r = await this.t.run(`backup-start ${storage} ${arg}`, 60000);
     if (r.code !== 0) throw new Error(r.stderr.trim() || r.stdout.trim().slice(0, 300) || 'Backup konnte nicht gestartet werden');
   }
+  /** Netzwerkkarte für Wake-on-LAN (Prüfskript ab Version 9). */
+  async netinfo() { const r = await this.t.run('netinfo', 15000); return r.code === 0 ? parseNetinfo(r.stdout) : {}; }
   async poweroff() { const r = await this.t.run('poweroff', 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Herunterfahren abgelehnt'); }
 
   /** Kernel-Meldungen zu Verbindungsfehlern der letzten 48 h (braucht Prüfskript ab Version 5). */

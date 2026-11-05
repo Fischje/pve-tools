@@ -146,6 +146,7 @@ export class DemoTransport {
     switch (a[0]) {
       case 'version': return ok(String(this.id === 'pbs' ? (w.pbsGate ?? 3) : EXPECTED_GATE_VERSION)); // pbs ist in der Demo absichtlich veraltet
       case 'kernel': return ok('');
+      case 'netinfo': return ok(this.id === 'pbs' ? 'dev=vmbr0\nphys=enp3s0\nmac=a8:a1:59:12:34:56\nwol=g\n' : '');
       case 'rechte': return ok(w.rightsOf(this.id).join('\n'));
       case 'storage-status': { if (this.id === 'pbs') return ok(''); return ok(`Name Type Status Total Used Available %\n${a[1]} pbs ${st.storageDown ? 'inactive' : 'active'} 17921372160 9012312320 8909059840 50.29%\n`); }
       case 'backup-start': {

@@ -148,7 +148,7 @@ function runsList(host) {
 }
 
 const JOB_STATE = { wartet: ['unknown', 'wartet'], läuft: ['watch', 'läuft'], ok: ['ok', 'in Ordnung'], fehler: ['critical', 'nicht erfolgreich'], fehlt: ['critical', 'nicht erreicht'], übersprungen: ['unknown', 'übersprungen'] };
-const SHUTDOWN = { angefordert: 'Der PBS wurde heruntergefahren.', aus: 'Der PBS bleibt an (Herunterfahren ist ausgeschaltet).', 'fehlt-recht': 'Der PBS bleibt an: das Recht „Herunterfahren“ fehlt.', fehler: 'Der PBS konnte nicht heruntergefahren werden.', nein: 'Der PBS bleibt an, damit nichts verloren geht.' };
+const SHUTDOWN = { 'kein-backup-tag': 'Der PBS bleibt an: Er ist an keinem Backup-Tag hochgefahren. Ausschalten mit „PBS herunterfahren“.', angefordert: 'Der PBS wurde heruntergefahren.', aus: 'Der PBS bleibt an (Herunterfahren ist ausgeschaltet).', 'fehlt-recht': 'Der PBS bleibt an: das Recht „Herunterfahren“ fehlt.', fehler: 'Der PBS konnte nicht heruntergefahren werden.', nein: 'Der PBS bleibt an, damit nichts verloren geht.' };
 
 function jobBox(job, title, now) {
   if (!job) return null;
@@ -192,8 +192,31 @@ function overviewTab(b, data) {
   });
   return [kpis,
     c ? h('section', { class: 'panel' }, h('div', { class: 'card-title' }, h('h2', {}, 'Backup-Lauf'), h('span', { class: `pill ${c.settings.mode === 'steuern' ? 'ok' : 'unknown'}` }, c.settings.mode === 'steuern' ? 'Das Tool steuert' : 'Das Tool beobachtet nur'), h('span', { class: 'spacer' }), h('button', { onclick: () => goTab('lauf') }, 'Öffnen')),
-      jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', now) ?? jobBox(c.last, 'Letzter Lauf des Tools', now) ?? h('p', { class: 'sub' }, 'Das Tool hat noch keinen Backup-Lauf gesteuert.')) : null,
+      pbsPower(c), jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', now) ?? jobBox(c.last, 'Letzter Lauf des Tools', now) ?? h('p', { class: 'sub' }, 'Das Tool hat noch keinen Backup-Lauf gesteuert.')) : null,
     h('div', { class: 'grid' }, cards)];
+}
+
+/** Knöpfe zum Ein- und Ausschalten des PBS mit kurzer Erklärung. */
+function pbsPower(c) {
+  const act = (body, okText) => ctx.act(() => ctx.api('POST', '/api/backups/control', body), okText);
+  const on = c.pbs.reachable, running = c.job?.phase === 'läuft';
+  return h('div', { class: `finding ${on ? 'ok' : 'info'}` },
+    h('b', {}, `${c.pbs.label}: ${on ? 'läuft' : 'aus oder nicht erreichbar'}`),
+    h('div', { class: 'sub' }, on
+      ? (running ? 'Gerade läuft ein Backup-Lauf. Danach fährt das Tool den PBS herunter, wenn alles geklappt hat und heute ein Backup-Tag ist.' : 'Ohne Backup-Lauf bleibt der PBS an, bis du ihn herunterfährst.')
+      : (c.wol?.mac ? `Einschalten schickt ein Magic Packet an ${c.wol.mac}. Fährt er an einem Backup-Tag hoch, sichert das Tool danach automatisch.` : 'Zum Einschalten fehlt noch die MAC-Adresse. Sie wird gelernt, sobald der PBS einmal läuft, oder du trägst sie unten ein.')),
+    h('div', { class: 'actions' },
+      on ? h('button', { disabled: running || !c.pbs.rightShutdown, title: !c.pbs.rightShutdown ? 'Recht „Herunterfahren“ fehlt auf dem PBS' : running ? 'Erst den Backup-Lauf abwarten' : '',
+        onclick: () => { if (confirm(`${c.pbs.label} jetzt herunterfahren? Laufende Wiederherstellungen oder Prüfungen auf dem PBS werden dabei abgebrochen.`)) act({ action: 'poweroff' }, 'Der PBS fährt in 20 Sekunden herunter.'); } }, 'PBS herunterfahren')
+        : h('button', { class: 'primary', disabled: !c.wol?.mac, onclick: () => act({ action: 'wake' }, 'Magic Packet gesendet. Der PBS sollte in 1–2 Minuten erreichbar sein.') }, 'PBS einschalten')));
+}
+function wolHint(c) {
+  const l = c.wol?.learned;
+  if (!l?.mac) return h('p', { class: 'sub' }, 'Noch keine MAC-Adresse gelernt. Sie wird gelernt, sobald der PBS das nächste Mal läuft.');
+  const wol = l.wol ?? '';
+  return h('p', { class: `sub${wol && !wol.includes('g') ? ' bad' : ''}` }, `Gelernt ${fmtDT(l.ts)}: ${l.mac}${l.phys ? ` an ${l.phys}` : ''}. `,
+    !wol ? (l.source === 'arp' ? 'Ob Wake-on-LAN an der Karte aktiv ist, zeigt das Prüfskript ab Version 9.' : '')
+      : wol.includes('g') ? 'Wake-on-LAN ist an der Netzwerkkarte aktiv.' : `Wake-on-LAN ist an der Netzwerkkarte AUS (${wol}). Auf dem PBS einschalten: ethtool -s ${l.phys ?? '<karte>'} wol g (und im BIOS „Wake on LAN“ aktivieren).`);
 }
 
 function laufTab(b) {
@@ -203,6 +226,7 @@ function laufTab(b) {
   const f = { pbs: h('select', {}, c.hostChoices.map((x) => h('option', { value: x.id, selected: x.id === s.pbsHostId }, x.label))), storage: field('text', s.storage, { size: 10 }),
     wait: field('number', s.waitAfterBootMin, { min: 0, max: 240, style: 'width:6em' }), hostWait: field('number', s.hostWaitMin, { min: 1, max: 240, style: 'width:6em' }),
     shutdown: h('input', { type: 'checkbox', checked: s.shutdown }),
+    mac: field('text', s.wolMac, { placeholder: c.wol?.learned?.mac ? `${c.wol.learned.mac} (gelernt)` : 'aa:bb:cc:dd:ee:ff', size: 20 }), bcast: field('text', s.wolBroadcast, { size: 18 }),
     days: [1, 2, 3, 4, 5, 6, 0].map((d) => ({ d, box: h('input', { type: 'checkbox', checked: s.backupDays.includes(d) }) })) };
   const dayNames = (list) => [1, 2, 3, 4, 5, 6, 0].filter((d) => list.includes(d)).map((d) => WD[d]).join(', ');
   // Gäste je Host: Haken = wird gesichert. Gespeichert wird die Ausschlussliste, damit neue Gäste automatisch mitgesichert werden (wie --all).
@@ -212,7 +236,7 @@ function laufTab(b) {
     unknown: x.select === 'exclude' ? x.ids.filter((id) => !x.guests.some((g) => g.vmid === id)) : [],
   }]));
   const collect = () => ({
-    storage: f.storage.value.trim(), pbsHostId: f.pbs.value, backupDays: f.days.filter((x) => x.box.checked).map((x) => x.d), waitAfterBootMin: Number(f.wait.value), hostWaitMin: Number(f.hostWait.value), shutdown: f.shutdown.checked,
+    storage: f.storage.value.trim(), pbsHostId: f.pbs.value, wolMac: f.mac.value.trim(), wolBroadcast: f.bcast.value.trim(), backupDays: f.days.filter((x) => x.box.checked).map((x) => x.d), waitAfterBootMin: Number(f.wait.value), hostWaitMin: Number(f.hostWait.value), shutdown: f.shutdown.checked,
     hosts: Object.fromEntries(c.hosts.map((x) => { const p = picks.get(x.id); const off = [...p.boxes.filter((y) => !y.box.checked).map((y) => y.g.vmid), ...p.unknown]; return [x.id, { enabled: p.enabled.checked, select: 'exclude', ids: off }]; })),
   });
   const out = h('div', {});
@@ -232,7 +256,7 @@ function laufTab(b) {
   const save = () => act({ action: 'settings', settings: collect() }, 'Einstellungen gespeichert.');
   const steuern = s.mode === 'steuern';
 
-  const status = h('section', { class: 'panel' }, h('h2', {}, 'Status'),
+  const status = h('section', { class: 'panel' }, h('h2', {}, 'Status'), pbsPower(c),
     h('div', { class: `finding ${steuern ? 'ok' : 'info'}` },
       h('b', {}, steuern ? 'Das Tool steuert die Backup-Läufe' : 'Das Tool beobachtet nur (der bisherige Orchestrator auf dem PBS läuft)'),
       h('div', { class: 'sub' }, steuern ? `${s.backupDays.length ? `Backup-Tage: ${dayNames(s.backupDays)}.` : 'Keine Backup-Tage gewählt: es wird nur von Hand gesichert.'} Fährt der PBS an einem Backup-Tag hoch, wartet das Tool ${s.waitAfterBootMin} min und sichert dann Host für Host. An anderen Tagen bleibt er an, ohne zu sichern. Nach dem Lauf wird der PBS nur nach vollständigem Erfolg heruntergefahren${s.shutdown ? '' : ' (ausgeschaltet: er bleibt immer an)'}.` : 'Zuerst Einstellungen und Trockenlauf prüfen. Dann auf „Das Tool steuert“ umstellen und auf dem PBS den alten Orchestrator abschalten (Cron @reboot auskommentieren).'),
@@ -249,6 +273,9 @@ function laufTab(b) {
     h('p', {}, h('label', {}, f.shutdown, ' PBS nach vollständigem Erfolg herunterfahren')),
     h('div', { class: 'f' }, h('span', {}, 'Backup-Tage: An diesen Tagen sichert das Tool automatisch, wenn der PBS hochfährt. An anderen Tagen bleibt der PBS an, ohne zu sichern.'),
       h('div', { class: 'checks big' }, f.days.map(({ d, box }) => h('label', {}, box, ` ${WD[d]}`)))),
+    h('div', { class: 'form-sec' }, h('h3', {}, 'Einschalten per Wake-on-LAN'),
+      h('div', { class: 'form-grid' }, h('label', { class: 'f' }, 'MAC-Adresse des PBS (leer = gelernte Adresse verwenden)', f.mac), h('label', { class: 'f' }, 'Broadcast-Adresse', f.bcast)),
+      wolHint(c)),
     c.lastSkip ? h('p', { class: 'sub' }, `Zuletzt ohne Backup hochgefahren (kein Backup-Tag): ${fmtDT(c.lastSkip)}.`) : null,
     !c.pbs.rightShutdown ? h('p', { class: 'sub bad' }, `Auf ${c.pbs.label} ist das Recht „Herunterfahren“ nicht freigegeben (Reiter Hosts einrichten).`) : null);
 

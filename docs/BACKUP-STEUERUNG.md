@@ -85,7 +85,14 @@ Das Tool ersetzt den Orchestrator auf dem PBS (`pbs-run-backups.sh`). Es läuft 
 **Ablauf**
 1. Der PBS (Host-Art „manuell“, wird von Hand oder automatisch eingeschaltet) fährt hoch. Das Tool erkennt den neuen Boot über die Laufzeit.
    Gesichert wird nur, wenn der PBS an einem **Backup-Tag** hochgefahren ist (Voreinstellung: Montag, einstellbar). An anderen Tagen
-   sichert das Tool nicht und fährt den PBS auch nicht herunter: Er bleibt an, bis ihr ihn ausschaltet. „Jetzt Backup starten“ geht an jedem Tag.
+   sichert das Tool nicht und fährt den PBS auch nicht herunter: Er bleibt an, bis ihr ihn ausschaltet. „Jetzt Backup starten“ geht an jedem Tag,
+   fährt den PBS danach aber an einem Nicht-Backup-Tag ebenfalls nicht herunter.
+
+**Ein- und Ausschalten von Hand** (Reiter „Backups & Snapshots“, „Überblick“ und „Backup-Lauf“):
+- „PBS einschalten“ schickt ein Magic Packet (Wake-on-LAN) aus dem LXC auf dem `router` an die MAC-Adresse des PBS. Die Adresse lernt das Tool, sobald der
+  PBS läuft (Prüfskript ab Version 9, Befehl `netinfo`, sonst aus der ARP-Tabelle), oder ihr tragt sie ein. Voraussetzung: Wake-on-LAN im BIOS des PBS an und an
+  der Karte aktiv (`ethtool <karte>` zeigt `Wake-on: g`; einschalten mit `ethtool -s <karte> wol g`). Das Tool zeigt den Zustand an.
+- „PBS herunterfahren“ fährt ihn sauber über das Prüfskript herunter (Recht `herunterfahren`), nicht während eines Backup-Laufs.
 2. Nach der **Wartezeit** (Voreinstellung 20 Minuten wie bisher) beginnt der Lauf. Pro Boot gibt es genau einen Lauf.
 3. Host für Host, in der festen Reihenfolge (Voreinstellung wie im alten Skript: `router`, dann `pve`): Ist der Host nicht erreichbar oder der Speicher `pbs` dort nicht aktiv, wartet das Tool
    (höchstens „Wartezeit auf einen Host“, Voreinstellung 30 Minuten) und überspringt den Host dann mit Fehler. Läuft auf dem Host schon ein vzdump (etwa vom alten Skript), wird er **übernommen**
