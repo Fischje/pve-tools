@@ -22,7 +22,7 @@ export function runningPanel(tests, data, { hostId = null } = {}) {
       disk?.progress ? h('p', { class: 'sub' }, `Langtest insgesamt: ${disk.progress.percent} % gelesen, Abschnitt ${disk.progress.segments + 1}`) : null);
   });
   const reasons = data.hosts.filter((x) => (!hostId || x.id === hostId) && x.decision?.reason && !running.some((r) => r.hostId === x.id)).map((x) => h('li', {}, h('b', {}, `${x.label}: `), x.decision.reason));
-  return h('section', { class: 'panel' }, h('h2', {}, running.length ? `Laufende Tests (${running.length})` : 'Laufende Tests'),
+  return h('section', { class: 'panel', id: 'running' }, h('h2', {}, running.length ? `Laufende Tests (${running.length})` : 'Laufende Tests'),
     rows.length ? rows : h('p', { class: 'sub' }, 'Gerade läuft kein Test.'),
     !rows.length && reasons.length ? h('ul', { class: 'plain sub' }, reasons) : null);
 }
@@ -40,7 +40,7 @@ export function hostTestsPanel(host, { showTitle = true } = {}) {
     h('td', {}, h('div', { class: 'row' },
       d.running ? h('button', { class: 'danger', onclick: () => ctx.abortTest(d) }, 'Abbrechen') : [h('button', { onclick: () => ctx.startTest(host, d, 'short') }, 'Kurz'), h('button', { onclick: () => ctx.startTest(host, d, 'long') }, 'Lang')],
       h('button', { onclick: () => ctx.act(() => ctx.api('POST', `/api/disks/${encodeURIComponent(d.serial)}/pause`, { paused: !d.paused }), d.paused ? 'Fortgesetzt.' : 'Pausiert.') }, d.paused ? 'Fortsetzen' : 'Pausieren')))));
-  return h('section', { class: 'panel' },
+  return h('section', { class: 'panel', id: `plan-${host.id}` },
     h('div', { class: 'host-head' }, h('h2', {}, showTitle ? host.label : 'Zeitplan und Fortschritt'), h('span', { class: 'state' }, status)),
     host.decision && host.decision.reason ? h('p', { class: 'sub' }, `Zeitplan: ${host.decision.reason}`) : null,
     host.disks.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Platte', 'Zustand', 'Kurztest', 'Langtest', 'Langtest-Fortschritt', ''].map((t) => h('th', {}, t)))), h('tbody', {}, rows))) : h('p', { class: 'sub' }, 'Keine Platten bekannt.'));
@@ -48,6 +48,8 @@ export function hostTestsPanel(host, { showTitle = true } = {}) {
 
 const filters = { host: '', result: '', kind: '' };
 let shown = 25;
+/** Filter der Testliste von außen setzen (Sprung aus einem Kennzahl-Kasten). */
+export function setTestFilters(f) { Object.assign(filters, { host: '', result: '', kind: '' }, f); shown = 25; }
 /** Alle bisherigen Tests mit Filtern. hostId = fest auf einen Host. */
 export function allTestsPanel(tests, data, { hostId = null } = {}) {
   const box = h('div', {});
@@ -64,7 +66,7 @@ export function allTestsPanel(tests, data, { hostId = null } = {}) {
   };
   const sel = (key, label, opts) => h('label', { class: 'f inline' }, label, h('select', { onchange: (e) => { filters[key] = e.target.value; shown = 25; draw(); } }, opts.map(([v, t]) => h('option', { value: v, selected: filters[key] === v }, t))));
   draw();
-  return h('section', { class: 'panel' }, h('div', { class: 'host-head' }, h('h2', {}, hostId ? 'Alle Tests dieses Hosts' : 'Alle Tests'), h('span', { class: 'spacer' }),
+  return h('section', { class: 'panel', id: 'alltests' }, h('div', { class: 'host-head' }, h('h2', {}, hostId ? 'Alle Tests dieses Hosts' : 'Alle Tests'), h('span', { class: 'spacer' }),
     hostId ? null : sel('host', 'Host', [['', 'alle'], ...data.hosts.map((x) => [x.id, x.label])]),
     sel('kind', 'Art', [['', 'alle'], ['short', 'Kurztest'], ['long', 'Langtest/Abschnitt']]), sel('result', 'Ergebnis', [['', 'alle'], ['ok', 'in Ordnung'], ['failed', 'fehlgeschlagen'], ['interrupted', 'unterbrochen'], ['running', 'läuft']])), box);
 }

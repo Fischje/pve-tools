@@ -202,3 +202,12 @@ label.f.inline { flex-direction: row; align-items: center; gap: 6px; }
 .navhead { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent; padding: 8px 8px; border-radius: 8px; text-align: left; font-size: 1rem; }
 .navhead:hover { background: var(--panel2); } .navhost.active .navhead { background: var(--panel2); }
 table.mini td { padding: 3px 10px 3px 0; border: 0; font-size: .9rem; }
+
+/* ---- Anklickbare Kennzahl-Kästen ---- */
+button.kpi.link { text-align: left; font: inherit; color: inherit; width: 100%; cursor: pointer; transition: border-color .12s, transform .12s; }
+button.kpi.link:hover { border-color: var(--accent); transform: translateY(-1px); }
+.kpi .kpi-go { float: right; font-size: 1.3rem; line-height: .8; color: var(--muted); }
+button.kpi.link:hover .kpi-go { color: var(--accent); }
+[id] { scroll-margin-top: 150px; }
+.flash { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: var(--radius); transition: outline-color 1.2s; }
+@media (prefers-reduced-motion: reduce) { button.kpi.link { transition: none; } button.kpi.link:hover { transform: none; } }

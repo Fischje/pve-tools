@@ -1,5 +1,5 @@
 // Host-Seite: links ein gruppiertes Menü (Host > Pools, Platten), rechts Überblick, Platten, ZFS (Pools und vdevs), Tests und Statistik des gewählten Hosts.
-import { h, HOURS_HINT, fmtCount, KIND, LABEL, ICON, fmtSize, fmtAge, fmtUp, fmtDT, fmtDate, pill, meter, fact, ctx, topFinding } from './dom.js';
+import { h, HOURS_HINT, fmtCount, KIND, LABEL, ICON, fmtSize, fmtAge, fmtUp, fmtDT, fmtDate, pill, meter, fact, ctx, topFinding, kpiBox } from './dom.js';
 import { runningPanel, hostTestsPanel, allTestsPanel } from './tests-view.js';
 import { hostBody } from './stats-view.js';
 
@@ -68,10 +68,10 @@ function overviewTab(host, data, stats, tests) {
   const counts = ORDER.map((l) => [l, host.disks.filter((d) => d.level === l).length]).filter(([, n]) => n);
   const w = host.window;
   const head = h('div', { class: 'kpis' },
-    h('div', { class: `kpi ${lv === 'ok' ? 'ok' : lv === 'unknown' ? '' : lv === 'watch' ? 'watch' : 'bad'}` }, h('div', { class: 'k' }, 'Gesamtzustand'), h('div', { class: 'v' }, LABEL[lv] ?? 'Unbekannt'), h('div', { class: 's' }, counts.map(([l, n]) => `${n}× ${LABEL[l]}`).join(' · ') || 'keine Platten')),
-    h('div', { class: 'kpi' }, h('div', { class: 'k' }, 'Erreichbarkeit'), h('div', { class: 'v' }, host.reachable ? 'Online' : 'Offline'), h('div', { class: 's' }, host.reachable ? `läuft seit ${fmtUp(host.uptimeSec)}` : (host.error ?? 'keine Antwort'))),
-    h('div', { class: 'kpi' }, h('div', { class: 'k' }, 'Testfenster'), h('div', { class: 'v' }, w.open ? 'offen' : 'zu'), h('div', { class: 's' }, w.open ? `noch ${Math.floor(w.minutesLeft / 60)} h ${w.minutesLeft % 60} min` : w.reason)),
-    h('div', { class: 'kpi' }, h('div', { class: 'k' }, 'Letzte Abfrage'), h('div', { class: 'v' }, fmtDT(host.lastPoll)), h('div', { class: 's' }, host.address ? `${host.address}${host.port && host.port !== 22 ? `:${host.port}` : ''}` : host.id)));
+    kpiBox('Gesamtzustand', LABEL[lv] ?? 'Unbekannt', counts.map(([l, n]) => `${n}× ${LABEL[l]}`).join(' · ') || 'keine Platten', lv === 'ok' ? 'ok' : lv === 'unknown' ? '' : lv === 'watch' ? 'watch' : 'bad', { view: 'host', hostId: host.id, hostTab: 'disks' }),
+    kpiBox('Erreichbarkeit', host.reachable ? 'Online' : 'Offline', host.reachable ? `läuft seit ${fmtUp(host.uptimeSec)}` : (host.error ?? 'keine Antwort')),
+    kpiBox('Testfenster', w.open ? 'offen' : 'zu', w.open ? `noch ${Math.floor(w.minutesLeft / 60)} h ${w.minutesLeft % 60} min` : w.reason, '', { view: 'zeitplan', tabs: { settings: 'zeitplan', 'settings-host': host.id } }),
+    kpiBox('Letzte Abfrage', fmtDT(host.lastPoll), host.address ? `${host.address}${host.port && host.port !== 22 ? `:${host.port}` : ''}` : host.id));
   const poolRows = host.pools.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Pool', 'Zustand', 'Aufbau', 'Belegt', 'Letzter Scrub'].map((t) => h('th', {}, t)))),
     h('tbody', {}, host.pools.map((p) => h('tr', {}, h('td', {}, h('button', { class: 'linkish', onclick: () => go(host.id, 'zfs', p.name) }, p.name)), h('td', {}, pill(p.level)), h('td', {}, p.vdevs.filter((v) => v.section === 'data').map((v) => v.type === 'disk' ? 'Einzelplatte' : v.name).join(', ')), h('td', {}, p.cap != null ? `${p.cap} % von ${fmtSize(p.size)}` : '–'),
       h('td', {}, p.scan?.state === 'finished' ? `${fmtDate(p.scan.finishedAt)} (${p.scan.errors} Fehler)` : p.scan?.state === 'running' ? `läuft, ${p.scan.percent ?? '?'} %` : 'nie')))))) : h('p', { class: 'sub' }, 'Kein ZFS auf diesem Host.');

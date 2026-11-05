@@ -62,7 +62,7 @@ export const ui = (() => {
   try { saved = JSON.parse(localStorage.getItem(UI_KEY) ?? '{}') ?? {}; } catch { /* privates Fenster o. Ä. */ }
   return { open: new Set(Array.isArray(saved.open) ? saved.open : []), tabs: saved.tabs && typeof saved.tabs === 'object' ? saved.tabs : {}, dirty: false };
 })();
-function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify({ open: [...ui.open], tabs: ui.tabs })); } catch { /* egal */ } }
+export function saveUi() { try { localStorage.setItem(UI_KEY, JSON.stringify({ open: [...ui.open], tabs: ui.tabs })); } catch { /* egal */ } }
 
 /**
  * Aufklappbarer Bereich mit großer Kopfzeile (ganze Breite klickbar).
@@ -113,4 +113,14 @@ export function hostSwitch(key, hosts, build) {
   const draw = () => { btns.forEach((b, i) => b.setAttribute('aria-pressed', String(hosts[i].id === cur))); content.replaceChildren(...[build(cur)].flat(Infinity).filter(Boolean)); };
   draw();
   return h('div', {}, hosts.length > 1 ? h('div', { class: 'seg hostseg', role: 'group', 'aria-label': 'Host wählen' }, btns) : null, content);
+}
+
+/**
+ * Kennzahl-Kasten. Mit `go` ist der ganze Kasten anklickbar und führt zur passenden Detailansicht (ctx.nav).
+ * @param {object|null} go Ziel für ctx.nav, z. B. { view: 'tests', scroll: 'running' }
+ */
+export function kpiBox(label, value, sub, cls = '', go = null) {
+  const kids = [h('div', { class: 'k' }, label, go ? h('span', { class: 'kpi-go', 'aria-hidden': 'true' }, '›') : null), h('div', { class: 'v' }, value), sub ? h('div', { class: 's' }, sub) : null];
+  if (!go) return h('div', { class: `kpi ${cls}` }, kids);
+  return h('button', { type: 'button', class: `kpi link ${cls}`, title: 'Details anzeigen', onclick: () => ctx.nav?.(go) }, kids);
 }

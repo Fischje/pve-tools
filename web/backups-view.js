@@ -1,6 +1,6 @@
 // Backups und Snapshots: Zustand von proxmox-autosnap, Snapshot-Stand je Gast, Backup-Läufe mit Ergebnis je Gast.
 // Aufgeteilt in Unterreiter: Überblick, Backup-Lauf (Steuerung durch das Tool), Snapshots (je Host), Gäste und Backup-Läufe (je Host).
-import { h, fmtDT, fmtMin, pill, fact, ctx, ui, fold, subTabs, hostSwitch } from './dom.js';
+import { h, fmtDT, fmtMin, pill, fact, ctx, ui, fold, subTabs, hostSwitch, kpiBox } from './dom.js';
 
 const WD = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
 const RES = { ok: ['ok', 'in Ordnung'], failed: ['critical', 'fehlgeschlagen'], interrupted: ['watch', 'unterbrochen'] };
@@ -14,7 +14,7 @@ export function ago(iso, now) {
   if (m < 48 * 60) return `vor ${Math.round(m / 60)} h`;
   return `vor ${Math.round(m / 1440)} Tagen`;
 }
-const kpi = (label, value, sub, cls = '') => h('div', { class: `kpi ${cls}` }, h('div', { class: 'k' }, label), h('div', { class: 'v' }, value), sub ? h('div', { class: 's' }, sub) : null);
+const kpi = kpiBox;
 const resultPill = (r) => { const [c, t] = RES[r] ?? ['unknown', r]; return h('span', { class: `pill ${c}` }, t); };
 
 function snapCell(s, now, keep) {
@@ -166,11 +166,15 @@ const hostLevelOf = (host) => (!host.supported ? 'unknown' : host.lastRun?.summa
 
 function overviewTab(b, data) {
   const k = b.kpi, last = b.lastRun, now = b.now;
+  const bk = (tab, hostId) => ({ view: 'backups', tabs: { bk: tab, ...(hostId ? { 'bk-host': hostId } : {}) } });
+  const failHost = b.hosts.find((x) => x.guests.some((g) => g.backup?.result === 'failed'))?.id;
+  const problemHost = b.hosts.find((x) => x.guests.some((g) => g.level === 'replace' || g.level === 'watch'))?.id;
   const kpis = h('div', { class: 'kpis' },
-    kpi('Letzter Backup-Lauf', last ? ago(last.start, now) : '–', last ? `${last.hostLabel}: ${last.status === 'OK' ? 'in Ordnung' : last.status ?? 'läuft'}` : 'noch keiner gelesen', last && last.status !== 'OK' && last.status ? 'bad' : last ? 'ok' : ''),
-    kpi('Backup-Läufe (30 Tage)', k.runs30, 'auf allen Hosts'), kpi('Fehlgeschlagene Backups', k.failedBackups, k.failedBackups ? (k.failedCause === 'verbindung' ? 'meist: Verbindung zum PBS' : 'beim letzten Lauf des Gastes') : 'keine', k.failedBackups ? 'bad' : 'ok'),
-    kpi('Snapshots', k.snapshotsOff ? `${k.snapshotsOn} an, ${k.snapshotsOff} aus` : `${k.snapshotsOn} Hosts an`, 'Schalter von autosnap', k.snapshotsOff ? 'watch' : 'ok'),
-    kpi('Gäste mit Hinweis', k.problems, `von ${k.guests} Gästen`, k.problems ? 'watch' : 'ok'));
+    kpi('Letzter Backup-Lauf', last ? ago(last.start, now) : '–', last ? `${last.hostLabel}: ${last.status === 'OK' ? 'in Ordnung' : last.status ?? 'läuft'}` : 'noch keiner gelesen', last && last.status !== 'OK' && last.status ? 'bad' : last ? 'ok' : '', bk('laeufe', last?.hostId)),
+    kpi('Backup-Läufe (30 Tage)', k.runs30, 'auf allen Hosts', '', bk('laeufe')),
+    kpi('Fehlgeschlagene Backups', k.failedBackups, k.failedBackups ? (k.failedCause === 'verbindung' ? 'meist: Verbindung zum PBS' : 'beim letzten Lauf des Gastes') : 'keine', k.failedBackups ? 'bad' : 'ok', bk('gaeste', failHost)),
+    kpi('Snapshots', k.snapshotsOff ? `${k.snapshotsOn} an, ${k.snapshotsOff} aus` : `${k.snapshotsOn} Hosts an`, 'Schalter von autosnap', k.snapshotsOff ? 'watch' : 'ok', bk('snapshots')),
+    kpi('Gäste mit Hinweis', k.problems, `von ${k.guests} Gästen`, k.problems ? 'watch' : 'ok', bk('gaeste', problemHost)));
   const c = b.control;
   const goTab = (tab, hostId) => { ui.tabs.bk = tab; if (hostId) { ui.tabs['bk-host'] = hostId; } ctx.render(); window.scrollTo(0, 0); };
   const cards = b.hosts.filter((x) => x.supported || x.gate.version != null).map((host) => {

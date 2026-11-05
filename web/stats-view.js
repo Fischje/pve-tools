@@ -1,8 +1,8 @@
 // Statistiken: Gesamtübersicht und je Host. Die Zahlen kommen fertig berechnet von /api/stats.
-import { h, KIND, LABEL, fmtSize, fmtAge, fmtMin, pill, meter } from './dom.js';
+import { h, KIND, LABEL, fmtSize, fmtAge, fmtMin, pill, meter, kpiBox } from './dom.js';
 import { barStack, heatmap, donut, hbars, timeline, lineChart, figure } from './charts.js';
 
-const kpi = (label, value, sub, cls = '') => h('div', { class: `kpi ${cls}` }, h('div', { class: 'k' }, label), h('div', { class: 'v' }, value), sub ? h('div', { class: 's' }, sub) : null);
+const kpi = kpiBox;
 const hourBlocked = (hr, times) => times.some((t) => { const f = Number(t.from.slice(0, 2)), e = Number(t.to.slice(0, 2)) % 24; return f < e ? hr >= f && hr < e : hr >= f || hr < e; });
 const rateClass = (r) => (r == null ? '' : r >= 98 ? 'ok' : r >= 85 ? 'watch' : 'bad');
 
@@ -22,16 +22,19 @@ function coverageRows(st, data, type) {
 /** KPIs und Diagramme für eine Statistik-Zusammenfassung (global oder ein Host). */
 function testWidgets(st, data, { hostId = null, labels = {} } = {}) {
   const plan = planOf(data, hostId);
-  const overdue = st.coverage.filter((c) => c.daysShort == null || c.daysShort > plan.shortDays * 1.1 || c.daysLong == null || c.daysLong > plan.longDays * 1.1).length;
+  const overdueList = st.coverage.filter((c) => c.daysShort == null || c.daysShort > plan.shortDays * 1.1 || c.daysLong == null || c.daysLong > plan.longDays * 1.1);
+  const overdue = overdueList.length, overdueHost = overdueList[0]?.hostId;
+  const to = (scroll, filters) => (hostId ? { view: 'host', hostId, hostTab: 'tests', scroll, filters } : { view: 'tests', scroll, filters });
   const t = st.totals;
-  const runningNames = data.hosts.flatMap((x) => (hostId && x.id !== hostId ? [] : x.disks.filter((d) => d.running).map((d) => `${d.device}`)));
+  const runningNames = data.hosts.flatMap((x) => (hostId && x.id !== hostId ? [] : x.disks.filter((d) => d.running).map((d) => (hostId ? d.device : `${x.label}: ${d.device.replace('/dev/', '')}`))));
   const kpis = h('div', { class: 'kpis' },
-    kpi('Tests in 30 Tagen', t.last30, `${t.last365} in den letzten 12 Monaten`),
-    kpi('Erfolgsquote', t.successRate == null ? '–' : `${t.successRate} %`, t.failed ? `${t.failed} fehlgeschlagen` : 'keine Fehlschläge', rateClass(t.successRate)),
-    kpi('Läuft gerade', h('span', {}, t.running ? h('span', { class: 'run-dot', 'aria-hidden': 'true' }) : null, t.running), t.running ? runningNames.slice(0, 3).join(', ') : 'kein Test aktiv'),
-    kpi('Langtests komplett', t.longCompleted, 'in den letzten 12 Monaten'),
-    kpi('Überfällige Platten', overdue, overdue ? 'Test nach Plan nicht aktuell' : 'alle Platten im Plan', overdue ? 'watch' : 'ok'),
-    kpi('Testzeit insgesamt', `${t.hoursTested} h`, 'Summe aller beendeten Tests'));
+    // Ziele: auf der Startseite der Reiter „Tests“, auf der Host-Seite dessen Reiter „Tests“
+    kpi('Tests in 30 Tagen', t.last30, `${t.last365} in den letzten 12 Monaten`, '', to('alltests', {})),
+    kpi('Erfolgsquote', t.successRate == null ? '–' : `${t.successRate} %`, t.failed ? `${t.failed} fehlgeschlagen` : 'keine Fehlschläge', rateClass(t.successRate), to('alltests', { result: t.failed ? 'failed' : '' })),
+    kpi('Läuft gerade', h('span', {}, t.running ? h('span', { class: 'run-dot', 'aria-hidden': 'true' }) : null, t.running), t.running ? runningNames.slice(0, 3).join(', ') : 'kein Test aktiv', '', to('running', null)),
+    kpi('Langtests komplett', t.longCompleted, 'in den letzten 12 Monaten', '', to('alltests', { kind: 'long' })),
+    kpi('Überfällige Platten', overdue, overdue ? 'Test nach Plan nicht aktuell' : 'alle Platten im Plan', overdue ? 'watch' : 'ok', to(`plan-${hostId ?? overdueHost ?? data.hosts[0]?.id}`, null)),
+    kpi('Testzeit insgesamt', `${t.hoursTested} h`, 'Summe aller beendeten Tests', '', to('alltests', {})));
 
   const months = st.byMonth;
   const sum = (k) => st.byKind[k];
@@ -61,7 +64,7 @@ export function globalStats(stats, data) {
   const d = stats.global.disks;
   return h('section', {}, h('div', { class: 'sec-title' }, h('h2', {}, 'Tests und Platten im Überblick')),
     testWidgets(stats.global, data, { labels }),
-    h('div', { class: 'kpis' }, kpi('Platten gesamt', d.count, `${d.byKind.hdd} HDD · ${d.byKind.ssd} SSD · ${d.byKind.nvme} NVMe`), kpi('Speicher gesamt', fmtSize(d.capacityBytes), 'Rohkapazität aller Platten'), kpi('Ø Betriebszeit', fmtAge(d.avgAgeHours), `längste: ${fmtAge(d.maxAgeHours)}`), kpi('Temperatur', d.avgTemp == null ? '–' : `${d.avgTemp} °C`, `Maximum ${d.maxTemp ?? '–'} °C`)));
+    h('div', { class: 'kpis' }, kpi('Platten gesamt', d.count, `${d.byKind.hdd} HDD · ${d.byKind.ssd} SSD · ${d.byKind.nvme} NVMe`, '', { view: 'uebersicht', scroll: 'alle-platten' }), kpi('Speicher gesamt', fmtSize(d.capacityBytes), 'Rohkapazität aller Platten', '', { view: 'uebersicht', scroll: 'zfs-speicher' }), kpi('Ø Betriebszeit', fmtAge(d.avgAgeHours), `längste: ${fmtAge(d.maxAgeHours)}`, '', { view: 'uebersicht', scroll: 'alle-platten' }), kpi('Temperatur', d.avgTemp == null ? '–' : `${d.avgTemp} °C`, `Maximum ${d.maxTemp ?? '–'} °C`, '', { view: 'uebersicht', scroll: 'alle-platten' })));
 }
 
 let selected = null;
@@ -86,11 +89,12 @@ export function hostBody(stats, data, hostId) {
   if (!st || !host) return h('p', { class: 'empty' }, 'Keine Daten.');
   const d = st.disks;
   const worstPool = host.pools.reduce((a, p) => (['ok', 'watch', 'replace', 'critical'].indexOf(p.level) > ['ok', 'watch', 'replace', 'critical'].indexOf(a) ? p.level : a), 'ok');
+  const toDisks = { view: 'host', hostId, hostTab: 'disks' };
   const extra = h('div', { class: 'kpis' },
-    kpi('Platten', d.count, `${d.byKind.hdd} HDD · ${d.byKind.ssd} SSD · ${d.byKind.nvme} NVMe`), kpi('Speicher (roh)', fmtSize(d.capacityBytes), `Ø Betriebszeit ${fmtAge(d.avgAgeHours)}`),
-    kpi('Temperatur', d.avgTemp == null ? '–' : `${d.avgTemp} °C`, `Maximum ${d.maxTemp ?? '–'} °C`, d.maxTemp >= 55 ? 'watch' : ''),
-    kpi('Verschleiß SSD/NVMe', d.avgWearUsed == null ? '–' : `Ø ${d.avgWearUsed} %`, d.maxWearUsed == null ? 'keine SSD/NVMe' : `höchster Wert ${d.maxWearUsed} %`, d.maxWearUsed >= 70 ? 'watch' : ''),
-    kpi('ZFS-Pools', host.pools.length, host.pools.length ? host.pools.map((p) => `${p.name}${p.cap != null ? ` ${p.cap} %` : ''}`).join(' · ') : 'kein ZFS', worstPool === 'ok' ? 'ok' : worstPool === 'watch' ? 'watch' : 'bad'));
+    kpi('Platten', d.count, `${d.byKind.hdd} HDD · ${d.byKind.ssd} SSD · ${d.byKind.nvme} NVMe`, '', toDisks), kpi('Speicher (roh)', fmtSize(d.capacityBytes), `Ø Betriebszeit ${fmtAge(d.avgAgeHours)}`, '', toDisks),
+    kpi('Temperatur', d.avgTemp == null ? '–' : `${d.avgTemp} °C`, `Maximum ${d.maxTemp ?? '–'} °C`, d.maxTemp >= 55 ? 'watch' : '', toDisks),
+    kpi('Verschleiß SSD/NVMe', d.avgWearUsed == null ? '–' : `Ø ${d.avgWearUsed} %`, d.maxWearUsed == null ? 'keine SSD/NVMe' : `höchster Wert ${d.maxWearUsed} %`, d.maxWearUsed >= 70 ? 'watch' : '', toDisks),
+    kpi('ZFS-Pools', host.pools.length, host.pools.length ? host.pools.map((p) => `${p.name}${p.cap != null ? ` ${p.cap} %` : ''}`).join(' · ') : 'kein ZFS', worstPool === 'ok' ? 'ok' : worstPool === 'watch' ? 'watch' : 'bad', host.pools.length ? { view: 'host', hostId, hostTab: 'zfs' } : null));
   const temp = figure('Temperaturverlauf (60 Tage)', lineChart(st.tempDaily, { label: `Tagesmittel der Plattentemperaturen von ${host.label}` }), { wide: true, legend: [['fill-short', 'Tagesmittel'], ['fill-muted', 'Minimum bis Maximum']] });
   const [kpis, charts] = testWidgets(st, data, { hostId });
   charts.insertBefore(temp, charts.children[2] ?? null);

@@ -1,11 +1,11 @@
 // Oberfläche von PVE-Tools. Reines JavaScript ohne Abhängigkeiten.
 // Alle Texte werden per textContent eingesetzt, nie als HTML (kein XSS durch Gerätenamen o. Ä.).
 
-import { ui, fold, subTabs, hostSwitch } from './dom.js';
+import { ui, fold, subTabs, hostSwitch, saveUi } from './dom.js';
 import { HOURS_HINT, fmtCount, WD, KIND, ICON, LABEL, RUN_LABEL, RESULT, h, put, d2, fmtDate, fmtDT, fmtSize, fmtAge, fmtUp, pill, fact, meter, topFinding, wearLevel, ctx, fmtDay, fmtMin, dur } from './dom.js';
 
 import { globalStats, hostStatsSection } from './stats-view.js';
-import { runningPanel, hostTestsPanel, allTestsPanel } from './tests-view.js';
+import { runningPanel, hostTestsPanel, allTestsPanel, setTestFilters } from './tests-view.js';
 import { hostPage, hostViewGo } from './host-view.js';
 import { backupsView } from './backups-view.js';
 
@@ -110,7 +110,7 @@ function poolsOverview() {
   if (!hosts.length) return null;
   const capLevel = (c) => (c == null ? 'unknown' : c >= 90 ? 'critical' : c >= 80 ? 'replace' : c >= 70 ? 'watch' : 'ok');
   const layout = (p) => p.vdevs.filter((v) => v.section === 'data').map((v) => (v.type === 'disk' ? 'Einzelplatte' : v.name.replace(/-\d+$/, ''))).filter((x, i, a) => a.indexOf(x) === i).join(', ');
-  return [h('div', { class: 'sec-title' }, h('h2', {}, 'Speicherplatz (ZFS)')),
+  return [h('div', { class: 'sec-title', id: 'zfs-speicher' }, h('h2', {}, 'Speicherplatz (ZFS)')),
     h('div', { class: 'pools' }, hosts.map((host) => h('article', { class: 'card' },
       h('div', { class: 'card-head' }, h('div', { class: 'model' }, host.label), h('span', { class: 'sub' }, `${host.pools.length} ${host.pools.length === 1 ? 'Pool' : 'Pools'}${host.reachable ? '' : ' · nicht erreichbar, letzter Stand'}`)),
       host.pools.map((p) => h('div', { class: 'pool-meter' },
@@ -124,7 +124,7 @@ function viewOverview() {
   if (!data.hosts.length) return h('p', { class: 'empty' }, 'Keine Hosts eingerichtet. Öffne den Reiter „Hosts einrichten“.');
   return [data.hosts.filter((x) => x.gate?.outdated).map(outdatedBanner), data.hosts.map(bannerEl),
     stats ? globalStats(stats, data) : null, poolsOverview(), stats ? hostStatsSection(stats, data) : null,
-    h('div', { class: 'sec-title' }, h('h2', {}, 'Alle Platten')), data.hosts.map(hostSection)];
+    h('div', { class: 'sec-title', id: 'alle-platten' }, h('h2', {}, 'Alle Platten')), data.hosts.map(hostSection)];
 }
 
 // ---------- Ansicht: Tests ----------
@@ -479,7 +479,20 @@ async function load(redraw = true, auto = false) {
   } catch (e) { if (!data) root.replaceChildren(h('p', { class: 'empty error' }, `Keine Verbindung: ${e.message}`)); }
 }
 
-Object.assign(ctx, { act, api, startTest, abortTest, openDetail, diskCard, render: () => render(), openUpdate: (host) => { view = 'hosts'; wizard = { mode: 'update', host, step: 1 }; render(); window.scrollTo(0, 0); } });
+/**
+ * Sprung zu einer Detailansicht (aus den Kennzahl-Kästen).
+ * @param {{view:string, hostId?:string, hostTab?:string, tabs?:object, scroll?:string, filters?:object|null}} t
+ */
+function nav(t) {
+  ui.dirty = false;
+  if (t.tabs) { Object.assign(ui.tabs, t.tabs); saveUi(); }
+  if (t.filters) setTestFilters(t.filters);
+  if (t.view === 'host') { view = 'host'; hostViewGo(t.hostId, t.hostTab ?? 'overview', null); } else { view = t.view; render(); }
+  if (t.scroll) requestAnimationFrame(() => { const el = document.getElementById(t.scroll); if (el) { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1600); } });
+  else window.scrollTo(0, 0);
+}
+
+Object.assign(ctx, { nav, act, api, startTest, abortTest, openDetail, diskCard, render: () => render(), openUpdate: (host) => { view = 'hosts'; wizard = { mode: 'update', host, step: 1 }; render(); window.scrollTo(0, 0); } });
 
 load();
 timer = setInterval(() => { if (view !== 'zeitplan' && view !== 'hosts' && !dialogOpen && !ui.dirty) load(true, true); }, 20000);
