@@ -120,6 +120,7 @@ export function overview(engine) {
     defaults: DEFAULT_SETTINGS,
     polling: engine.pollingSettings(),
     mail: engine.notifier?.publicConfig() ?? null,
+    backupPbs: engine.orch.settings().pbsHostId || null,
   };
 }
 

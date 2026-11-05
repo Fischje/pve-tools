@@ -72,7 +72,7 @@ Die Platte führt den Test selbst aus. Das Tool stößt ihn nur an und liest sp�
 | Langtest-Intervall | alle 3 Monate | Anzahl Monate (1–12), empfohlen 3–4 |
 | Gesperrte Wochentage | Montag | Mehrfachauswahl. Gilt für Kurz- **und** Langtests. Fällt ein Termin darauf, rutscht er auf den nächsten erlaubten Tag |
 | Host-Art | PVE: „fest“, PBS: „manueller Start“ | „Fest“ = Start und Ende nach festem Rhythmus. „Manueller Start“ = beliebiger Start, aber festes Tagesende |
-| Betriebsfenster | PVE: 08:00 – 22:00, PBS: Start offen, Ende 19:00 | Wann der Server läuft. Bei „manueller Start“ gibt es nur das feste Tagesende (hier schaltet sich der PBS selbst aus) |
+| Betriebsfenster | PVE: 08:00 – 22:00, PBS: Start offen, Ende 19:00 | Wann der Server läuft. Bei „manueller Start“ gibt es nur das feste Tagesende, bis zu dem Tests laufen dürfen |
 | Sperrzeit täglich | 19:00 – 01:00 (alle Hosts) | **Absolut tabu.** Dann läuft kein Test, auch nicht „Jetzt starten“. Darf über Mitternacht gehen, mehrere Sperrzeiten möglich |
 | Anlaufzeit nach dem Hochfahren | 20 Minuten | Wartezeit, bis nach dem Boot getestet wird (ZFS-Import, Dienste, Backups) |
 | Sicherheitsabstand vor Ende | 30 Minuten | So lange vor dem Herunterfahren wird kein Test mehr gestartet und ein laufender sauber beendet |
@@ -121,7 +121,7 @@ Fährt der Server herunter, wird ein laufender Selbsttest abgebrochen (im Testpr
 #### PBS: Start von Hand, festes Ende um 19:00
 
 Der PBS wird montags um 07:50 vom Host hochgefahren. Nach einer Viertelstunde starten die Backup-Skripte auf den
-Hosts. An allen anderen Tagen startest du ihn von Hand zum Testen. Er schaltet sich **jeden Tag um 19:00 selbst aus**.
+Hosts. An allen anderen Tagen startest du ihn von Hand zum Testen. Tests laufen dort höchstens bis 19:00 (Tagesende). Aus schaltet ihn das Tool nur nach dem geplanten Backup-Lauf, sonst ihr selbst (Stand 2026-11-05).
 Für Hosts der Art „manueller Start“ gilt:
 
 - **Montag ist gesperrt** (Standard): Backup-Tag, der PBS wird automatisch hochgefahren und es wird nie getestet.

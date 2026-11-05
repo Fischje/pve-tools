@@ -84,7 +84,7 @@ function bannerEl(host) {
     : b.autoStart ? (b.startsInMin > 0 ? `${host.label} ist erreichbar. Ein fälliger Test startet automatisch in ${b.startsInMin} min.` : `${host.label} ist erreichbar. Ein fälliger Test startet automatisch.`)
     : `${host.label} ist erreichbar. Der Test startet erst nach deiner Freigabe.`;
   const post = (action) => act(() => api('POST', `/api/hosts/${host.id}/approval`, { action }), action === 'now' ? 'Freigegeben.' : 'Gespeichert.');
-  return h('div', { class: 'banner' }, h('div', {}, h('b', {}, msg), h('div', { class: 'sub' }, 'Wenn du den Host nur für etwas anderes gestartet hast, wähle „Heute nicht“. Er schaltet sich um 19:00 selbst ab.')),
+  return h('div', { class: 'banner' }, h('div', {}, h('b', {}, msg), h('div', { class: 'sub' }, `Wenn du den Host nur für etwas anderes gestartet hast, wähle „Heute nicht“. Tests laufen höchstens bis ${host.settings?.dayEnd ?? '19:00'} (Tagesende). Ausschalten musst du den Host selbst${host.id === data.backupPbs ? ' (Knopf „PBS herunterfahren“ unter Backups & Snapshots)' : ''}, außer nach dem geplanten Backup-Lauf.`)),
     h('div', { class: 'actions' }, h('button', { class: 'primary', onclick: () => post('now') }, 'Jetzt testen'), h('button', { onclick: () => post('snooze') }, 'Später (1 h)'), h('button', { onclick: () => post('skip') }, 'Heute nicht')));
 }
 
@@ -163,14 +163,14 @@ function hostSettingsForm(host) {
     } catch (e) { msg.className = 'error'; msg.textContent = e.message; }
   };
   return h('section', { class: 'panel' },
-    h('div', { class: 'host-head' }, h('h2', {}, host.label), h('span', { class: 'state' }, host.mode === 'manuell' ? 'Start von Hand, festes Tagesende' : 'fester Rhythmus')),
+    h('div', { class: 'host-head' }, h('h2', {}, host.label), h('span', { class: 'state' }, host.mode === 'manuell' ? 'Start bei Bedarf, Tests bis zum Tagesende' : 'fester Rhythmus')),
     h('div', { class: 'form-grid' },
       h('label', { class: 'f' }, 'Zeitplan', h('span', {}, ctl.enabled, ' aktiv (ausschalten pausiert alle automatischen Tests)')),
       num('shortIntervalMonths', 'Kurztest alle', 1, 12, 'Monate'), num('longIntervalMonths', 'Langtest alle', 1, 12, 'Monate, empfohlen 3–4'),
       h('div', { class: 'f' }, h('span', {}, 'Gesperrte Wochentage (nie testen)'), h('div', { class: 'checks' }, ctl.wd.map((x) => h('label', {}, x.el, x.n.slice(0, 2))))),
       h('div', { class: 'f' }, h('span', {}, 'Sperrzeiten täglich (nie testen)'), timesBox),
       host.mode === 'manuell'
-        ? [h('label', { class: 'f' }, 'Tagesende (Host schaltet sich selbst ab)', ctl.dayEnd), h('label', { class: 'f' }, 'Test nach dem Hochfahren', h('span', {}, ctl.autoStart, ' automatisch starten (sonst erst nach Klick im Banner)'))]
+        ? [h('label', { class: 'f' }, 'Tagesende (Tests enden rechtzeitig davor)', ctl.dayEnd), h('label', { class: 'f' }, 'Test nach dem Hochfahren', h('span', {}, ctl.autoStart, ' automatisch starten (sonst erst nach Klick im Banner)'))]
         : h('div', { class: 'f' }, h('span', {}, 'Betriebsfenster des Hosts (von – bis)'), h('div', { class: 'row' }, ctl.from, '–', ctl.to)),
       num('startupMinutes', 'Anlaufzeit nach dem Hochfahren', 0, 180, 'Minuten'), num('marginMinutes', 'Sicherheitsabstand vor Ende/Sperrzeit', 0, 240, 'Minuten')),
     h('div', { class: 'row', style: null }, h('button', { class: 'primary', onclick: save }, 'Speichern'),
@@ -312,7 +312,7 @@ function wizardPanel() {
     const f = {
       id: h('input', { type: 'text', placeholder: 'z. B. pve', pattern: '[a-z0-9-]+', maxlength: 32 }), label: h('input', { type: 'text', placeholder: 'z. B. pve (Hauptserver)' }),
       address: h('input', { type: 'text', placeholder: '192.168.1.11', value: w.host?.address ?? '' }), port: h('input', { type: 'number', min: 1, max: 65535, value: w.host?.port ?? 22 }),
-      kind: h('select', {}, [['fest', 'Läuft zu festen Zeiten'], ['dauer', 'Läuft immer'], ['manuell', 'Wird von Hand gestartet, schaltet sich selbst ab']].map(([v, t]) => h('option', { value: v }, t))),
+      kind: h('select', {}, [['fest', 'Läuft zu festen Zeiten'], ['dauer', 'Läuft immer'], ['manuell', 'Wird bei Bedarf gestartet (von Hand oder per Wake-on-LAN), Tests nur bis zu einem festen Tagesende']].map(([v, t]) => h('option', { value: v }, t))),
       from: h('input', { type: 'time', value: '08:00' }), to: h('input', { type: 'text', value: '22:00', size: 6 }), dayEnd: h('input', { type: 'text', value: '19:00', size: 6 }),
     };
     const extra = h('div', {});

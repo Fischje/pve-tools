@@ -61,7 +61,7 @@ Host-Arten in `hosts.json`:
 |--------|-----------|
 | `dauer` | läuft immer (z. B. `router`) |
 | `fest` | läuft zu festen Zeiten, `window` gibt das Betriebsfenster an (z. B. `pve`, 08:00–22:00) |
-| `manuell` | wird von Hand gestartet, schaltet sich selbst zum Tagesende ab (`dayEnd`, z. B. der PBS um 19:00) |
+| `manuell` | wird bei Bedarf gestartet (von Hand oder per Wake-on-LAN); Tests laufen nur bis zum Tagesende (`dayEnd`, z. B. 19:00). Ausschalten: von Hand oder nach dem geplanten Backup-Lauf durch das Tool |
 
 Alles Weitere (Intervalle, gesperrte Wochentage, Sperrzeiten) stellst du später in der Oberfläche unter „Zeitplan & Konto“ ein.
 
