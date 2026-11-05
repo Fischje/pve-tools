@@ -85,8 +85,10 @@ Das Tool ersetzt den Orchestrator auf dem PBS (`pbs-run-backups.sh`). Es läuft 
 **Ablauf**
 1. Der PBS (Host-Art „manuell“, wird von Hand oder automatisch eingeschaltet) fährt hoch. Das Tool erkennt den neuen Boot über die Laufzeit.
    Gesichert wird nur, wenn der PBS an einem **Backup-Tag** hochgefahren ist (Voreinstellung: Montag, einstellbar). An anderen Tagen
-   sichert das Tool nicht und fährt den PBS auch nicht herunter: Er bleibt an, bis ihr ihn ausschaltet. „Jetzt Backup starten“ geht an jedem Tag,
-   fährt den PBS danach aber an einem Nicht-Backup-Tag ebenfalls nicht herunter.
+   sichert das Tool nicht und fährt den PBS auch nicht herunter: Er bleibt an, bis ihr ihn ausschaltet. „Jetzt Backup starten …“ geht an jedem Tag:
+   Ein Dialog fragt, welche Hosts und Gäste gesichert werden sollen (vorausgewählt ist die normale Auswahl). Nach einem Lauf von Hand wird der PBS
+   **nie** heruntergefahren, auch an einem Backup-Tag nicht, und der geplante Lauf dieses Tages findet trotzdem statt.
+   Automatisch heruntergefahren wird nur nach dem geplanten Lauf an einem Backup-Tag, und nur bei vollständigem Erfolg.
 
 **Ein- und Ausschalten von Hand** (Reiter „Backups & Snapshots“, „Überblick“ und „Backup-Lauf“):
 - „PBS einschalten“ schickt ein Magic Packet (Wake-on-LAN) aus dem LXC auf dem `router` an die MAC-Adresse des PBS. Die Adresse lernt das Tool, sobald der

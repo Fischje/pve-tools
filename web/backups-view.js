@@ -148,7 +148,7 @@ function runsList(host) {
 }
 
 const JOB_STATE = { wartet: ['unknown', 'wartet'], läuft: ['watch', 'läuft'], ok: ['ok', 'in Ordnung'], fehler: ['critical', 'nicht erfolgreich'], fehlt: ['critical', 'nicht erreicht'], übersprungen: ['unknown', 'übersprungen'] };
-const SHUTDOWN = { 'kein-backup-tag': 'Der PBS bleibt an: Er ist an keinem Backup-Tag hochgefahren. Ausschalten mit „PBS herunterfahren“.', angefordert: 'Der PBS wurde heruntergefahren.', aus: 'Der PBS bleibt an (Herunterfahren ist ausgeschaltet).', 'fehlt-recht': 'Der PBS bleibt an: das Recht „Herunterfahren“ fehlt.', fehler: 'Der PBS konnte nicht heruntergefahren werden.', nein: 'Der PBS bleibt an, damit nichts verloren geht.' };
+const SHUTDOWN = { 'von-hand': 'Der PBS bleibt an (Lauf von Hand). Ausschalten mit „PBS herunterfahren“.', 'kein-backup-tag': 'Der PBS bleibt an: Er ist an keinem Backup-Tag hochgefahren. Ausschalten mit „PBS herunterfahren“.', angefordert: 'Der PBS wurde heruntergefahren.', aus: 'Der PBS bleibt an (Herunterfahren ist ausgeschaltet).', 'fehlt-recht': 'Der PBS bleibt an: das Recht „Herunterfahren“ fehlt.', fehler: 'Der PBS konnte nicht heruntergefahren werden.', nein: 'Der PBS bleibt an, damit nichts verloren geht.' };
 
 function jobBox(job, title, now) {
   if (!job) return null;
@@ -194,6 +194,42 @@ function overviewTab(b, data) {
     c ? h('section', { class: 'panel' }, h('div', { class: 'card-title' }, h('h2', {}, 'Backup-Lauf'), h('span', { class: `pill ${c.settings.mode === 'steuern' ? 'ok' : 'unknown'}` }, c.settings.mode === 'steuern' ? 'Das Tool steuert' : 'Das Tool beobachtet nur'), h('span', { class: 'spacer' }), h('button', { onclick: () => goTab('lauf') }, 'Öffnen')),
       pbsPower(c), jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', now) ?? jobBox(c.last, 'Letzter Lauf des Tools', now) ?? h('p', { class: 'sub' }, 'Das Tool hat noch keinen Backup-Lauf gesteuert.')) : null,
     h('div', { class: 'grid' }, cards)];
+}
+
+/** Dialog „Jetzt Backup starten“: Hosts und Gäste von Hand auswählen. Danach wird der PBS nicht heruntergefahren. */
+function manualDialog(c) {
+  ctx.setDialogOpen?.(true);
+  const msg = h('p', { class: 'error', role: 'alert' });
+  const groups = c.hosts.map((x) => {
+    const inPlan = (g) => x.enabled && (x.select === 'all' || (x.select === 'exclude' ? !x.ids.includes(g.vmid) : x.ids.includes(g.vmid)));
+    const boxes = [...x.guests].sort((a, b) => a.vmid - b.vmid).map((g) => ({ g, box: h('input', { type: 'checkbox', checked: inPlan(g) }) }));
+    const count = h('span', { class: 'sub' });
+    const upd = () => { count.textContent = ` ${boxes.filter((y) => y.box.checked).length} von ${boxes.length} ausgewählt`; };
+    boxes.forEach((y) => y.box.addEventListener('change', upd)); upd();
+    const all = (on) => { boxes.forEach((y) => { y.box.checked = on; }); upd(); };
+    return { x, boxes, el: h('div', { class: 'form-sec' },
+      h('div', { class: 'card-title' }, h('h3', {}, x.label), count, h('span', { class: 'spacer' }),
+        h('button', { type: 'button', onclick: () => all(true) }, 'Alle'), h('button', { type: 'button', onclick: () => all(false) }, 'Keine')),
+      !x.right ? h('p', { class: 'sub bad' }, 'Auf diesem Host ist das Recht „Backups starten“ nicht freigegeben.') : !x.reachable ? h('p', { class: 'sub bad' }, 'Dieser Host ist gerade nicht erreichbar.') : null,
+      boxes.length ? h('div', { class: 'checks big' }, boxes.map(({ g, box }) => h('label', { class: g.status === 'running' ? '' : 'sub' }, box, ` ${g.vmid} ${g.name}${g.status === 'running' ? '' : ' (aus)'}`))) : h('p', { class: 'sub' }, 'Keine Gäste gelesen.')) };
+  });
+  const close = () => dlg.close();
+  const start = async (btn) => {
+    const pick = Object.fromEntries(groups.map((gr) => [gr.x.id, gr.boxes.filter((y) => y.box.checked).map((y) => y.g.vmid)]).filter(([, ids]) => ids.length));
+    if (!Object.keys(pick).length) { msg.textContent = 'Bitte mindestens einen Gast auswählen.'; return; }
+    btn.disabled = true; msg.textContent = '';
+    try { await ctx.api('POST', '/api/backups/control', { action: 'start', pick }); close(); ctx.act(async () => {}, 'Backup-Lauf von Hand gestartet. Der PBS bleibt danach an.'); }
+    catch (e) { msg.textContent = e.message; btn.disabled = false; }
+  };
+  const btn = h('button', { class: 'primary', onclick: () => start(btn) }, 'Backup starten');
+  const dlg = h('dialog', { 'aria-label': 'Backup von Hand starten', onclose: () => { ctx.setDialogOpen?.(false); dlg.remove(); } },
+    h('div', { class: 'dlg-head' }, h('div', {}, h('h2', {}, 'Backup von Hand starten'), h('div', { class: 'sub' }, `Die Hosts werden nacheinander gesichert (Speicher „${c.settings.storage}“). Vorausgewählt ist die Auswahl aus den Einstellungen.`)), h('button', { onclick: close }, 'Schließen')),
+    h('div', { class: 'dlg-body' },
+      !c.pbs.reachable ? h('div', { class: 'finding critical' }, `${c.pbs.label} ist nicht erreichbar. Bitte erst einschalten.`) : null,
+      groups.map((gr) => gr.el),
+      h('div', { class: 'finding info' }, 'Nach einem Lauf von Hand wird der PBS nicht heruntergefahren. Das macht das Tool nur nach dem geplanten Lauf an einem Backup-Tag. Ausschalten mit „PBS herunterfahren“.'),
+      msg, h('div', { class: 'row' }, btn, h('button', { onclick: close }, 'Abbrechen'))));
+  document.body.append(dlg); dlg.showModal();
 }
 
 /** Knöpfe zum Ein- und Ausschalten des PBS mit kurzer Erklärung. */
@@ -263,7 +299,7 @@ function laufTab(b) {
       h('div', { class: 'actions' },
         steuern ? h('button', { onclick: () => act({ action: 'settings', settings: { mode: 'beobachten' } }, 'Das Tool beobachtet nur.') }, 'Zurück auf „nur beobachten“')
           : h('button', { class: 'primary', onclick: () => { if (confirm('Das Tool steuert ab jetzt die Backups. Hast du den alten Orchestrator auf dem PBS abgeschaltet?')) act({ action: 'settings', settings: { mode: 'steuern' } }, 'Das Tool steuert die Backups.'); } }, 'Das Tool steuert'),
-        h('button', { onclick: () => { if (confirm('Jetzt einen Backup-Lauf starten? Der PBS muss laufen.')) act({ action: 'start' }, 'Backup-Lauf gestartet.'); } }, 'Jetzt Backup starten'),
+        h('button', { disabled: c.job?.phase === 'läuft', onclick: () => manualDialog(c) }, 'Jetzt Backup starten …'),
         c.job?.phase === 'läuft' ? h('button', { onclick: () => act({ action: 'abort' }, 'Im Tool abgebrochen.') }, 'Im Tool abbrechen') : null)),
     jobBox(c.job?.phase === 'läuft' ? c.job : null, 'Aktueller Lauf', b.now), jobBox(c.job?.phase === 'läuft' ? c.last : (c.job ?? c.last), 'Letzter Lauf des Tools', b.now));
 

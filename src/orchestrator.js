@@ -134,24 +134,43 @@ export class Orchestrator {
     } catch (e) { this.engine.log(`Backup-Steuerung: ${e.stack ?? e.message}`); } finally { this.running = false; }
   }
 
-  begin(s, { bootAt, manual }) {
+  /**
+   * @param {{bootAt:number|null, manual:boolean, pick?:Record<string, number[]>|null}} o pick: Auswahl von Hand (Host -> Gast-IDs), sonst die Einstellungen
+   */
+  begin(s, { bootAt, manual, pick = null }) {
     const now = this.now().getTime();
-    const hosts = this.order(s).filter((id) => this.selection(id, s).enabled).map((id) => ({ id, state: 'wartet', since: now, note: '' }));
+    const hosts = pick
+      ? this.order(s).filter((id) => pick[id]?.length).map((id) => ({ id, state: 'wartet', since: now, note: '', sel: { select: 'only', ids: pick[id] } }))
+      : this.order(s).filter((id) => this.selection(id, s).enabled).map((id) => ({ id, state: 'wartet', since: now, note: '' }));
     const job = { id: `bk${now}`, startedAt: now, bootAt, manual: !!manual, phase: 'läuft', hosts, shutdown: null, endedAt: null, storage: s.storage };
-    if (bootAt != null) this.db.setSetting(BOOT_KEY, String(bootAt));
+    // Nur der geplante Lauf zählt als „dieser Boot ist erledigt“. Ein Lauf von Hand verhindert den geplanten nicht.
+    if (bootAt != null && !manual) this.db.setSetting(BOOT_KEY, String(bootAt));
     this.saveJob(job);
     this.engine.event(null, null, `Backup-Lauf gestartet${manual ? ' (von Hand)' : ''}: ${hosts.map((h) => h.id).join(' → ') || 'keine Hosts'}`);
     return job;
   }
 
   /** Von Hand starten (Knopf in der Oberfläche). Der PBS muss laufen. */
-  async startNow() {
+  /**
+   * Von Hand starten (Dialog in der Oberfläche): nur die ausgewählten Gäste. Danach wird der PBS nie heruntergefahren.
+   * @param {Record<string, number[]>} pick Host-ID -> Gast-IDs
+   */
+  async startNow(pick) {
     const s = this.settings();
+    const order = this.order(s);
+    if (!pick || typeof pick !== 'object' || Array.isArray(pick)) throw new Error('Bitte mindestens einen Gast auswählen.');
+    const clean = {};
+    for (const [id, ids] of Object.entries(pick)) {
+      if (!order.includes(id)) throw new Error(`Host unbekannt oder nicht sicherbar: ${id}`);
+      if (!Array.isArray(ids) || ids.length > 64 || ids.some((n) => !Number.isInteger(n) || n < 100 || n > 999999999)) throw new Error('Gast-IDs: nur Zahlen ab 100, höchstens 64 je Host');
+      if (ids.length) clean[id] = [...new Set(ids)].sort((a, b) => a - b);
+    }
+    if (!Object.keys(clean).length) throw new Error('Bitte mindestens einen Gast auswählen.');
     if (this.job()?.phase === 'läuft') throw new Error('Es läuft schon ein Backup-Lauf.');
     if (!s.pbsHostId) throw new Error('Kein PBS-Host festgelegt.');
     const hs = this.db.getHostState(s.pbsHostId);
     if (!hs?.reachable) throw new Error('Der PBS ist nicht erreichbar. Bitte erst einschalten.');
-    const job = this.begin(s, { bootAt: this.bootAt(s), manual: true });
+    const job = this.begin(s, { bootAt: this.bootAt(s), manual: true, pick: clean });
     await this.advance(job, { ...s });
     return this.job();
   }
@@ -170,7 +189,7 @@ export class Orchestrator {
     const host = this.engine.hosts.find((h) => h.id === cur.id);
     if (!host) { cur.state = 'fehler'; cur.note = 'Host nicht mehr in der Liste'; this.saveJob(job); return; }
     const client = this.engine.client(cur.id);
-    const sel = this.selection(cur.id, s);
+    const sel = cur.sel ?? this.selection(cur.id, s);
     try {
       if (cur.state === 'wartet') {
         if (!cur.activeAt) { cur.activeAt = now; cur.since = now; } // die Wartezeit zählt ab dem Moment, in dem der Host an der Reihe ist
@@ -232,8 +251,10 @@ export class Orchestrator {
     job.shutdown = 'nein';
     // Heruntergefahren wird nur, wenn der PBS an einem Backup-Tag hochgefahren ist. Sonst bleibt er an, bis du ihn ausschaltest
     // (Knopf „PBS herunterfahren“). Das gilt auch für einen von Hand gestarteten Lauf.
+    // Automatisch heruntergefahren wird nur nach dem geplanten Lauf an einem Backup-Tag. Nach einem Lauf von Hand nie.
     const bootDay = new Date(job.bootAt ?? job.startedAt).getDay();
-    if (allOk && s.shutdown && !s.backupDays.includes(bootDay)) job.shutdown = 'kein-backup-tag';
+    if (allOk && job.manual) job.shutdown = 'von-hand';
+    else if (allOk && s.shutdown && !s.backupDays.includes(bootDay)) job.shutdown = 'kein-backup-tag';
     else if (allOk && s.shutdown && s.pbsHostId) {
       try {
         if (!this.engine.hostRights(s.pbsHostId).includes('herunterfahren')) job.shutdown = 'fehlt-recht';

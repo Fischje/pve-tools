@@ -113,7 +113,7 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       try {
         if (b.action === 'settings') engine.orch.save(b.settings ?? {});
         else if (b.action === 'dryrun') return send(res, 200, { ok: true, plan: await engine.orch.dryRun() });
-        else if (b.action === 'start') await engine.orch.startNow();
+        else if (b.action === 'start') await engine.orch.startNow(b.pick);
         else if (b.action === 'abort') engine.orch.abort();
         else if (b.action === 'wake') await engine.orch.wake();
         else if (b.action === 'poweroff') await engine.orch.powerOff();

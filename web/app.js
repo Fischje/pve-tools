@@ -492,7 +492,7 @@ function nav(t) {
   else window.scrollTo(0, 0);
 }
 
-Object.assign(ctx, { nav, act, api, startTest, abortTest, openDetail, diskCard, render: () => render(), openUpdate: (host) => { view = 'hosts'; wizard = { mode: 'update', host, step: 1 }; render(); window.scrollTo(0, 0); } });
+Object.assign(ctx, { nav, act, api, setDialogOpen: (on) => { dialogOpen = on; if (!on) render(); }, startTest, abortTest, openDetail, diskCard, render: () => render(), openUpdate: (host) => { view = 'hosts'; wizard = { mode: 'update', host, step: 1 }; render(); window.scrollTo(0, 0); } });
 
 load();
 timer = setInterval(() => { if (view !== 'zeitplan' && view !== 'hosts' && !dialogOpen && !ui.dirty) load(true, true); }, 20000);

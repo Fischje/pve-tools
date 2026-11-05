@@ -7,6 +7,8 @@ import { DemoWorld, DemoTransport } from '../src/demo/world.js';
 import { Notifier } from '../src/notify.js';
 import { cleanBackupSettings } from '../src/orchestrator.js';
 
+const PICK = { router: [109, 112], pve: [118] };
+
 async function setup({ allDays = true } = {}) {
   let t = new Date(2026, 10, 3, 9, 0).getTime();
   const clock = () => new Date(t);
@@ -187,13 +189,13 @@ test('Trockenlauf zeigt Auswahl und Probleme, startet aber nichts; Abbrechen bee
 
 test('Von Hand starten: nur bei erreichbarem PBS und nie doppelt', async () => {
   const { o, world } = await setup();
-  const j = await o.startNow();
+  const j = await o.startNow(PICK);
   assert.equal(j.manual, true); assert.equal(j.phase, 'läuft');
-  await assert.rejects(() => o.startNow(), /schon ein Backup-Lauf/);
+  await assert.rejects(() => o.startNow(PICK), /schon ein Backup-Lauf/);
   o.abort();
   world.setUp('pbs', false);
   const { engine } = o; await engine.pollHost('pbs');
-  await assert.rejects(() => o.startNow(), /nicht erreichbar/);
+  await assert.rejects(() => o.startNow(PICK), /nicht erreichbar/);
 });
 
 test('Backup-Tage: Voreinstellung Montag; an anderen Tagen wird nicht gesichert, der PBS bleibt an, „Jetzt Backup starten“ geht weiter', async () => {
@@ -208,7 +210,7 @@ test('Backup-Tage: Voreinstellung Montag; an anderen Tagen wird nicht gesichert,
   await o.tick(); assert.equal(o.job(), null, 'auch beim nächsten Takt nicht');
   const plan = await o.dryRun();
   assert.ok(plan.notes.some((n) => /kein Backup-Tag/.test(n)));
-  const j = await o.startNow();
+  const j = await o.startNow(PICK);
   assert.equal(j.manual, true, 'von Hand geht es trotzdem');
 });
 
@@ -223,14 +225,42 @@ test('Backup-Tage sind einstellbar, ungültige Tage werden abgelehnt', async () 
   assert.deepEqual(calls('router'), ['backup-start pbs all']);
 });
 
-test('Kein Backup-Tag: auch ein von Hand gestarteter Lauf fährt den PBS danach nicht herunter', async () => {
-  const { o, advance, calls } = await setup({ allDays: false }); // Dienstag
+test('Lauf von Hand: nur die ausgewählten Gäste, danach nie herunterfahren (auch an einem Backup-Tag)', async () => {
+  const { o, advance, calls } = await setup(); // alle Tage sind Backup-Tage
   o.save({ mode: 'steuern' });
-  await o.startNow(); await advance(31); await o.tick(); await advance(31); await o.tick();
+  await o.startNow(PICK);
+  assert.deepEqual(calls('router'), ['backup-start pbs only 109,112']);
+  await advance(31); await o.tick();
+  assert.deepEqual(calls('pve'), ['backup-start pbs only 118']);
+  await advance(31); await o.tick();
   const job = o.job();
-  assert.equal(job.phase, 'fertig');
-  assert.equal(job.shutdown, 'kein-backup-tag');
-  assert.deepEqual(calls('pbs'), []);
+  assert.equal(job.phase, 'fertig'); assert.equal(job.manual, true);
+  assert.equal(job.shutdown, 'von-hand');
+  assert.deepEqual(calls('pbs'), [], 'kein Herunterfahren nach einem Lauf von Hand');
+});
+
+test('Lauf von Hand: Auswahl wird geprüft, nur gewählte Hosts laufen', async () => {
+  const { o, calls } = await setup();
+  await assert.rejects(() => o.startNow({}), /mindestens einen Gast/);
+  await assert.rejects(() => o.startNow({ router: [] }), /mindestens einen Gast/);
+  await assert.rejects(() => o.startNow({ pbs: [101] }), /nicht sicherbar/);
+  await assert.rejects(() => o.startNow({ router: ['109; id'] }), /Gast-IDs/);
+  const j = await o.startNow({ pve: [118, 118, 121] });
+  assert.deepEqual(j.hosts.map((x) => x.id), ['pve'], 'router ohne Auswahl ist nicht dabei');
+  assert.deepEqual(calls('pve'), ['backup-start pbs only 118,121']);
+});
+
+test('Kein Backup-Tag: auch der geplante Lauf fährt nicht herunter; ein Lauf von Hand verhindert den geplanten nicht', async () => {
+  const { o, advance, bootPbs, calls } = await setup({ allDays: false }); // Dienstag
+  o.save({ mode: 'steuern', backupDays: [2] });
+  await bootPbs(5); // Wartezeit (20 min) noch nicht um
+  await o.startNow({ router: [109] }); await advance(31); await o.tick();
+  assert.equal(o.lastJob().shutdown, 'von-hand');
+  await o.tick();
+  assert.equal(o.job().manual, false, 'danach startet der geplante Lauf');
+  await advance(31); await o.tick(); await advance(31); await o.tick();
+  assert.equal(o.job().shutdown, 'angefordert', 'Dienstag ist hier Backup-Tag: geplanter Lauf fährt herunter');
+  assert.deepEqual(calls('pbs'), ['poweroff']);
 });
 
 test('PBS einschalten (Wake-on-LAN) und von Hand herunterfahren', async () => {
@@ -252,6 +282,6 @@ test('PBS einschalten (Wake-on-LAN) und von Hand herunterfahren', async () => {
   assert.throws(() => o.save({ wolMac: 'aa:bb' }), /MAC/);
   assert.throws(() => o.save({ wolBroadcast: '999.1.1.1' }), /Broadcast/);
   world.setUp('pbs', true); await engine.pollHost('pbs');
-  o.save({ mode: 'steuern' }); await o.startNow();
+  o.save({ mode: 'steuern' }); await o.startNow(PICK);
   await assert.rejects(() => o.powerOff(), /Backup-Lauf/);
 });
