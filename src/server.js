@@ -250,7 +250,7 @@ async function main() {
   const provisioner = demo ? null : new Provisioner({ engine, dataDir, repoDir: ROOT, persist: (list) => writeHostsFile(hostsFile, list) });
   const app = createApp({ db, engine, auth, allowPublic: env.ALLOW_PUBLIC === '1', provisioner });
   const port = Number(env.PORT ?? 8080), listen = env.LISTEN ?? '0.0.0.0';
-  app.listen(port, listen, () => log(`pve-disk-tool läuft auf http://${listen}:${port} (nur lokales Netz)`));
+  app.listen(port, listen, () => log(`PVE-Tools läuft auf http://${listen}:${port} (nur lokales Netz)`));
 
   let running = false;
   const tick = async () => { if (running) return; running = true; try { await engine.tick(); } finally { running = false; } };

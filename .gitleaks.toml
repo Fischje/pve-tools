@@ -1,6 +1,6 @@
 # gitleaks-Regeln (übernommen aus dem Palast). Standardregeln plus eine Regel für
 # Passwort-Zuweisungen (VAR_PASSWORD=wert), die gitleaks sonst übersieht.
-title = "pve-disk-tool"
+title = "pve-tools"
 
 [extend]
 useDefault = true

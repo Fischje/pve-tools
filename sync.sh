@@ -7,7 +7,7 @@ set -uo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
 # Die Sperrdatei ist einstellbar, damit die Tests von sync.sh nicht mit einem echten Abgleich um dieselbe Sperre streiten.
-exec 9>"${SYNC_LOCK:-/tmp/pve-disk-tool-sync.lock}"
+exec 9>"${SYNC_LOCK:-/tmp/pve-tools-sync.lock}"
 flock -n 9 || exit 0
 log() { echo "$(date '+%F %T') $*"; }
 

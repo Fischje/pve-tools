@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prüfskript für den SSH-Zugang von pve-disk-tool (läuft AUF dem Proxmox-Host).
+# Prüfskript für den SSH-Zugang von PVE-Tools (läuft AUF dem Proxmox-Host).
 #
 # Zweck: Der SSH-Schlüssel des Tools darf auf dem Host nur diese kleine Liste von Befehlen ausführen.
 # Aufruf: Per sudo aus authorized_keys (command="sudo /etc/diskmon/gate.sh"). Der Befehl des Tools steht

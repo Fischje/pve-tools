@@ -20,8 +20,8 @@ apt install -y nodejs
 ## 2. Programm holen
 
 ```bash
-git clone https://github.com/Fischje/pve-disk-tool /opt/pve-disk-tool
-cd /opt/pve-disk-tool
+git clone https://github.com/Fischje/pve-tools /opt/pve-tools
+cd /opt/pve-tools
 npm test            # alle Tests sollten grün sein
 ```
 
@@ -48,9 +48,9 @@ installiert sein (Debian 12: 9.2). Die Einrichtung ist im Demo-Modus nicht verf�
 #### SSH-Schlüssel und Hostliste
 
 ```bash
-mkdir -p /opt/pve-disk-tool/data/ssh
-ssh-keygen -t ed25519 -N '' -C 'diskmon@lxc' -f /opt/pve-disk-tool/data/ssh/id_ed25519
-cat /opt/pve-disk-tool/data/ssh/id_ed25519.pub        # diese Zeile brauchst du gleich
+mkdir -p /opt/pve-tools/data/ssh
+ssh-keygen -t ed25519 -N '' -C 'diskmon@lxc' -f /opt/pve-tools/data/ssh/id_ed25519
+cat /opt/pve-tools/data/ssh/id_ed25519.pub        # diese Zeile brauchst du gleich
 cp hosts.example.json data/hosts.json
 nano data/hosts.json                                   # Adressen und Art der Hosts eintragen
 ```
@@ -80,7 +80,7 @@ Skript per sudo und beschränkt den Schlüssel auf diesen Befehl und die Quell-I
 Test vom LXC aus (sollte eine JSON-Plattenliste liefern):
 
 ```bash
-ssh -i /opt/pve-disk-tool/data/ssh/id_ed25519 diskmon@192.168.1.11 list
+ssh -i /opt/pve-tools/data/ssh/id_ed25519 diskmon@192.168.1.11 list
 ```
 
 Fragt `ssh` nach einem Passwort, fehlt meist `-i <Schlüssel>` im Aufruf. Ohne `-i` probiert `ssh` nur die Standardschlüssel von root, und
@@ -103,15 +103,15 @@ Dieser Schritt kommt vor der Einrichtung per Weboberfläche. Das Tool startet au
 Mit systemd (empfohlen im LXC):
 
 ```bash
-cat > /etc/systemd/system/pve-disk-tool.service <<'UNIT'
+cat > /etc/systemd/system/pve-tools.service <<'UNIT'
 [Unit]
-Description=pve-disk-tool (Platten-Gesundheit, nur LAN)
+Description=PVE-Tools (Platten, ZFS, Backups und Snapshots; nur LAN)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-WorkingDirectory=/opt/pve-disk-tool
-Environment=DATA_DIR=/opt/pve-disk-tool/data
+WorkingDirectory=/opt/pve-tools
+Environment=DATA_DIR=/opt/pve-tools/data
 Environment=PORT=8080
 # Auf die LAN-Adresse des LXC einschränken:
 Environment=LISTEN=192.168.1.20
@@ -122,7 +122,7 @@ User=root
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload && systemctl enable --now pve-disk-tool
+systemctl daemon-reload && systemctl enable --now pve-tools
 ```
 
 Oder mit Docker: `cp .env.example .env`, `BIND_IP` anpassen, dann `docker compose up -d --build`. Der Ordner `data/`
@@ -145,13 +145,13 @@ Der Weg einer Änderung ist derselbe wie bei deinen Webseiten und dem Discord-Bo
 Einrichten (einmalig, im LXC als root):
 
 ```bash
-cd /opt/pve-disk-tool
+cd /opt/pve-tools
 git pull            # holt update.sh, sync.sh und install-sync.sh
 ./install-sync.sh   # richtet den 5-Minuten-Timer ein
 ```
 
 Der erste Lauf stellt den Klon von deinem bisherigen Zweig auf `main` um. Das Protokoll siehst du mit
-`journalctl -u pve-disk-tool-sync -n 50`, den Timer mit `systemctl list-timers pve-disk-tool-sync.timer`.
+`journalctl -u pve-tools-sync -n 50`, den Timer mit `systemctl list-timers pve-tools-sync.timer`.
 Ausschalten: `./install-sync.sh --entfernen`.
 
 **Folge:** Ein Push auf `claude/**` ist nach rund 5 Minuten im LXC produktiv. Der Dienst startet dabei kurz neu.
@@ -175,11 +175,11 @@ Jede Mail kommt nur einmal pro Änderung. Optional gibt es eine Entwarnung, wenn
 ## 7. Sichern und aktualisieren
 
 - Der Ordner `data/` enthält Datenbank, Schlüssel und Hostliste. Der LXC sollte im normalen Proxmox-Backup sein.
-- **Von Hand aktualisieren:** `/opt/pve-disk-tool/update.sh` (im LXC als root). Mit dem automatischen Abgleich (Abschnitt 5) ist das nur noch nötig, wenn du nicht bis zum nächsten Lauf warten willst. Das Skript holt die neue Version, lässt die Tests laufen, sichert die
+- **Von Hand aktualisieren:** `/opt/pve-tools/update.sh` (im LXC als root). Mit dem automatischen Abgleich (Abschnitt 5) ist das nur noch nötig, wenn du nicht bis zum nächsten Lauf warten willst. Das Skript holt die neue Version, lässt die Tests laufen, sichert die
   Datenbank nach `data/vor-update-…` (die letzten 5 bleiben), startet den Dienst neu und prüft, ob er antwortet. Schlägt ein Schritt fehl, geht es
   automatisch auf die vorherige Version zurück. Es ändert nichts, wenn schon alles aktuell ist, und bricht bei lokalen Änderungen im Programmordner ab.
   Einstellungen, Passwort, Hostliste und Verlauf liegen in `data/` und bleiben unberührt.
-- **Mit Docker:** `cd /opt/pve-disk-tool && git pull && docker compose up -d --build`.
+- **Mit Docker:** `cd /opt/pve-tools && git pull && docker compose up -d --build`.
 - **Neue Prüfskript-Version:** Das Prüfskript auf den Hosts hat eine Versionsnummer. Ist sie älter als die im Tool, steht auf der Startseite ein Hinweis und im Reiter „Hosts einrichten“ bei dem Host „veraltet“. Ein Klick auf „Skript aktualisieren“ spielt es neu auf. Dafür gibst du das root-Passwort des Hosts kurz ein (wird nicht gespeichert). Der Fingerabdruck von der Einrichtung wird wieder verwendet. Bis dahin funktioniert alles Bisherige weiter, nur neue Funktionen (z. B. der Füllstand der ZFS-Pools) fehlen auf diesem Host.
 - **Verbindungsfehler (Kabel/Port) melden:** Der CRC-Anstieg einer Platte wird mit jedem Prüfskript erkannt. Die Kernel-Meldungen (`ata… bus error`, Link zurückgefallen) braucht Prüfskript Version 5 (rein lesender Befehl `kernel`, nur ausgewählte Zeilen der letzten 48 Stunden). Dafür bei allen Hosts, auch beim PBS, „Skript aktualisieren“ wählen. Mails dazu höchstens alle 12 Stunden je Ursache; abschaltbar unter „E-Mail-Benachrichtigung“.
 - **Snapshots vom Tool auslösen lassen:** Prüfskript Version 7 und das Recht „Snapshots auslösen erlauben“ (Haken beim Einrichten bzw. „Skript aktualisieren“, mit dem root-Passwort). Dabei wird auch der verwaltete Wrapper `autosnap-run` v2 installiert (der alte bleibt als Sicherung, seine Werte werden übernommen). Danach im Reiter „Backups & Snapshots“ „Das Tool übernimmt“. Siehe [BACKUP-STEUERUNG.md](BACKUP-STEUERUNG.md).
@@ -187,6 +187,21 @@ Jede Mail kommt nur einmal pro Änderung. Optional gibt es eine Entwarnung, wenn
 - **Backups und Snapshots anzeigen:** Dafür braucht das Prüfskript Version 4 (rein lesende Befehle für Gäste, Snapshots und Backup-Läufe). Im Reiter „Hosts einrichten“ bei den PVE-Hosts „Skript aktualisieren“ wählen. Der PBS braucht es dafür nicht.
 - **Zugang auf den Hosts erneuern:** Nur nötig, wenn in den Hinweisen zu einer neuen Version steht, dass sich `host-setup/gate.sh` geändert hat.
   Dann im Reiter „Hosts“ bei jedem Host „Neu einrichten“ wählen. Sonst bleibt der Zugang unverändert gültig.
+
+## Umzug vom alten Namen (pve-disk-tool → pve-tools)
+
+Installationen von vor November 2026 laufen noch als `/opt/pve-disk-tool` mit dem Dienst `pve-disk-tool`. Das Programm funktioniert damit weiter,
+für klare Namen gibt es einen einmaligen Umzug (im LXC als root):
+
+```bash
+/opt/pve-disk-tool/umzug-pve-tools.sh
+```
+
+Das Skript hält Abgleich und Dienst an, verschiebt den Ordner nach `/opt/pve-tools` (unter dem alten Pfad bleibt ein Verweis), benennt die Datenbank in
+`pvetools.sqlite` um, legt den Dienst als `pve-tools` an (Port, Adresse und Datenordner werden übernommen), startet und prüft ihn und richtet den Abgleich
+als `pve-tools-sync` ein. Schlägt ein Schritt fehl, setzt es alles zurück, und der alte Dienst läuft wieder. Ein zweiter Aufruf tut nichts.
+
+Danach: `systemctl status pve-tools`, Protokoll des Abgleichs mit `journalctl -u pve-tools-sync -n 50`. Wenn alles läuft, kann der Verweis weg: `rm /opt/pve-disk-tool`.
 
 ## Demo ohne echte Hosts
 

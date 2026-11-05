@@ -83,3 +83,18 @@ test('Update: schlägt die schnelle Testauswahl fehl, wird zurückgerollt und de
   assert.equal(w.head(), vorher);
   assert.match(readFileSync(path.join(w.work, 'data', 'letzter-testlauf.log'), 'utf8'), /SCHNELL-FEHLER/);
 });
+
+test('Datenbank: neuer Name pvetools.sqlite, eine alte disktool.sqlite wird weiter benutzt, bis sie umbenannt ist', async () => {
+  const { openDb } = await import('../src/db.js');
+  const { mkdtempSync: mk, existsSync: ex } = await import('node:fs');
+  const { tmpdir: td } = await import('node:os');
+  const neu = mk(path.join(td(), 'db-neu-'));
+  openDb(neu).setSetting('x', '1');
+  assert.ok(ex(path.join(neu, 'pvetools.sqlite')) && !ex(path.join(neu, 'disktool.sqlite')));
+  const alt = mk(path.join(td(), 'db-alt-'));
+  const { DatabaseSync } = await import('node:sqlite');
+  const o = new DatabaseSync(path.join(alt, 'disktool.sqlite')); o.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)'); o.exec("INSERT INTO settings VALUES ('alt','ja')"); o.close();
+  const db = openDb(alt);
+  assert.equal(db.getSetting('alt'), 'ja', 'alte Datenbank wird weiter benutzt');
+  assert.ok(!ex(path.join(alt, 'pvetools.sqlite')), 'keine zweite, leere Datenbank');
+});

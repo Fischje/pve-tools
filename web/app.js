@@ -1,4 +1,4 @@
-// Oberfläche von pve-disk-tool. Reines JavaScript ohne Abhängigkeiten.
+// Oberfläche von PVE-Tools. Reines JavaScript ohne Abhängigkeiten.
 // Alle Texte werden per textContent eingesetzt, nie als HTML (kein XSS durch Gerätenamen o. Ä.).
 
 import { ui, fold, subTabs, hostSwitch } from './dom.js';

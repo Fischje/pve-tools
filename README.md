@@ -1,6 +1,6 @@
 # Fischje's PVE-Tools
 
-Das Repo heißt noch `pve-disk-tool`, weil es als Platten-Monitor angefangen hat.
+Repo `Fischje/pve-tools` (früher `pve-disk-tool`, weil es als Platten-Monitor angefangen hat). Im LXC: Ordner `/opt/pve-tools`, Dienst `pve-tools`.
 
 Eine kleine Website nur für das lokale Netz, die den Zustand der Festplatten (HDD, SATA-SSD, NVMe) von Proxmox VE und
 Proxmox Backup Server so zeigt, dass es auch Laien verstehen. Das Tool läuft in einem eigenen LXC. Auf den Proxmox-Hosts
@@ -43,6 +43,7 @@ npm run demo        # Demo mit simulierten Hosts
 | `src/server.js`, `src/auth.js`, `src/service.js` | Webserver, Passwort, Aufbereitung für die Oberfläche |
 | `src/kernel.js` | Auswertung der Kernel-Meldungen zu SATA-/NVMe-Verbindungsfehlern |
 | `host-setup/autosnap-run` | Verwalteter Wrapper für proxmox-autosnap (liest /etc/autosnap.conf) |
+| `umzug-pve-tools.sh` | Einmaliger Umzug einer alten Installation (pve-disk-tool) auf die neuen Namen |
 | `src/orchestrator.js` | Backup-Lauf durch das Tool: Boot erkennen, Hosts nacheinander sichern, über die Aufgabenliste warten, PBS bei Erfolg herunterfahren |
 | `src/snapshots.js` | Zeitplan der Snapshots, die das Tool auslöst (fällig, nachholen, Pausentag) |
 | `src/backups.js` | Auswertung von Gästen, Snapshots, vzdump-Läufen und proxmox-autosnap |

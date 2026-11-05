@@ -120,10 +120,9 @@ fester Dienstname, damit nie zwei Läufe gleichzeitig starten) und `herunterfahr
 - Nur feste Befehle, IDs nur Ziffern, Namen aus Positivlisten, keine freie Shell.
 - Das Tool löscht nie selbst Snapshots. Das erledigt weiter proxmox-autosnap mit eigenen Regeln.
 
-## Umbenennung
+## Umbenennung (erledigt)
 
-Die Oberfläche heißt „Fischje's PVE-Tools“. Das GitHub-Repo kann ich nicht selbst umbenennen. Vorschlag: `pve-tools` (wie der LXC).
-1. GitHub, Repo, Settings, „Repository name“ ändern. Alte Adressen leitet GitHub weiter.
-2. Im LXC: `cd /opt/pve-disk-tool && git remote set-url origin https://github.com/Fischje/pve-tools.git`.
-3. Pfade (`/opt/pve-disk-tool`) und Dienstname (`pve-disk-tool`) können bleiben, damit der automatische Abgleich unverändert läuft.
-4. In dieser Sitzung muss das Repo danach unter dem neuen Namen neu hinzugefügt werden.
+- GitHub-Repo: `Fischje/pve-tools` (alte Adressen leitet GitHub weiter).
+- Im LXC: Programmordner `/opt/pve-tools`, Dienst `pve-tools`, Abgleich `pve-tools-sync`, Datenbank `data/pvetools.sqlite`.
+  Der Umzug einer bestehenden Installation geht in einem Schritt mit `umzug-pve-tools.sh`, siehe [INSTALLATION.md](INSTALLATION.md), Abschnitt „Umzug vom alten Namen“.
+- Auf den Proxmox-Hosts bleiben Benutzer `diskmon` und Ordner `/etc/diskmon`. Eine Umbenennung dort hieße, jeden Host neu einzurichten, und brächte keinen Nutzen.

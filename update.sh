@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Aktualisiert pve-disk-tool im LXC: neue Version holen, Tests laufen lassen, Datenbank sichern, Dienst neu starten.
+# Aktualisiert PVE-Tools im LXC: neue Version holen, Tests laufen lassen, Datenbank sichern, Dienst neu starten.
 # Schlägt ein Schritt fehl, wird automatisch auf die vorherige Version zurückgegangen.
-# Aufruf (im LXC, als root):  /opt/pve-disk-tool/update.sh        (BRANCH=main ./update.sh wechselt auf diesen Zweig)
+# Aufruf (im LXC, als root):  /opt/pve-tools/update.sh        (BRANCH=main ./update.sh wechselt auf diesen Zweig)
 # Wird auch von sync.sh (alle 5 Minuten, siehe install-sync.sh) aufgerufen.
-# Einstellbar über Umgebungsvariablen: DIENST (Standard pve-disk-tool), BRANCH, DATA_DIR, PORT, LISTEN, HEALTH_URL.
+# Einstellbar über Umgebungsvariablen: DIENST (Standard pve-tools, bei alten Installationen pve-disk-tool), BRANCH, DATA_DIR, PORT, LISTEN, HEALTH_URL.
 # Werte für DATA_DIR, PORT und LISTEN werden, wenn nicht gesetzt, aus der systemd-Unit des Dienstes gelesen.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")"
-DIENST="${DIENST:-pve-disk-tool}"
+# Dienstname: pve-tools; ältere Installationen (vor dem Umzug mit umzug-pve-tools.sh) heißen noch pve-disk-tool.
+if [[ -z "${DIENST:-}" ]]; then
+  if systemctl cat pve-tools.service >/dev/null 2>&1 || ! systemctl cat pve-disk-tool.service >/dev/null 2>&1; then DIENST=pve-tools; else DIENST=pve-disk-tool; fi
+fi
 
 dienst_env() { systemctl show "$DIENST" -p Environment --value 2>/dev/null | tr ' ' '\n' | sed -n "s/^$1=//p" | head -n1 || true; }
 DATA_DIR="${DATA_DIR:-$(dienst_env DATA_DIR)}"; DATA_DIR="${DATA_DIR:-./data}"
@@ -53,10 +56,10 @@ if node -e "process.exit(require('./package.json').scripts?.['test:quick'] ? 0 :
 
 echo "Sichere die Datenbank …"
 if systemctl is-active --quiet "$DIENST" 2>/dev/null; then systemctl stop "$DIENST"; gestoppt=1; fi
-if compgen -G "$DATA_DIR/disktool.sqlite*" >/dev/null; then
+if compgen -G "$DATA_DIR/*.sqlite*" >/dev/null; then
   sicherung="$DATA_DIR/vor-update-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$sicherung"
-  cp -a "$DATA_DIR"/disktool.sqlite* "$sicherung"/
+  cp -a "$DATA_DIR"/*.sqlite* "$sicherung"/
   # Nur die letzten 5 Sicherungen behalten.
   ls -1d "$DATA_DIR"/vor-update-* 2>/dev/null | head -n -5 | xargs -r rm -rf
 fi

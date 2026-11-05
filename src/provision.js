@@ -86,7 +86,7 @@ export class Provisioner {
   async publicKey() {
     if (!existsSync(this.keyFile)) {
       await mkdir(path.dirname(this.keyFile), { recursive: true, mode: 0o700 });
-      const r = await this.runner('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', 'diskmon@pve-disk-tool', '-f', this.keyFile]);
+      const r = await this.runner('ssh-keygen', ['-t', 'ed25519', '-N', '', '-C', 'diskmon@pve-tools', '-f', this.keyFile]);
       if (r.code !== 0) throw new Error(`SSH-Schlüssel konnte nicht erzeugt werden: ${r.stderr.trim()}`);
     }
     const pub = (await readFile(`${this.keyFile}.pub`, 'utf8')).trim().split('\n')[0];
@@ -168,7 +168,7 @@ export class Provisioner {
     const bindIp = action === 'update' ? existing.bindIp !== false : req.bindIp !== false;
     const script = buildRemoteScript({ gate, setup, publicKey, action: action === 'remove' ? 'remove' : 'install', bindIp, installPackages: !!req.installPackages, rights, wrapper });
 
-    const dir = await mkdtemp(path.join(this.tmp, 'disktool-'));
+    const dir = await mkdtemp(path.join(this.tmp, 'pvetools-'));
     let res;
     try {
       const askpass = path.join(dir, 'askpass.sh');

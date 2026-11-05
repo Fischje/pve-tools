@@ -1,4 +1,4 @@
-# pve-disk-tool als Container. Braucht nur Node und den SSH-Client.
+# PVE-Tools als Container. Braucht nur Node und den SSH-Client.
 FROM node:22-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-client tzdata \
  && rm -rf /var/lib/apt/lists/*

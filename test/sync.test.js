@@ -127,7 +127,7 @@ test('Sperrdatei: ein laufender Abgleich blockiert einen zweiten, aber nur auf d
 
 test('Regressionstest: die Standard-Sperrdatei eines echten Abgleichs stört die Tests nicht (sie liefen sonst innerhalb von update.sh in einen Rückfall)', async () => {
   const w = world(); w.release();
-  const release = await holdLock('/tmp/pve-disk-tool-sync.lock'); // so hält der echte Abgleich seine Sperre
+  const release = await holdLock('/tmp/pve-tools-sync.lock'); // so hält der echte Abgleich seine Sperre
   try {
     const r = w.run(); // diese Welt nutzt ihre eigene Sperrdatei (SYNC_LOCK)
     assert.match(r.stdout, /aktualisiert/, r.stdout + r.stderr);

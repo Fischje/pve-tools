@@ -1,7 +1,7 @@
 // SQLite-Datenbank (eingebautes node:sqlite). Zeiten als Epoch-Millisekunden.
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { normalizePool } from './zfs.js';
 
 const SCHEMA = `
@@ -31,7 +31,13 @@ CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEG
 
 export function openDb(dir) {
   let file = ':memory:';
-  if (dir) { mkdirSync(dir, { recursive: true }); file = path.join(dir, 'disktool.sqlite'); }
+  if (dir) {
+    mkdirSync(dir, { recursive: true });
+    // Neuer Name pvetools.sqlite. Ältere Installationen haben disktool.sqlite: die wird weiter benutzt, bis das Umzugsskript sie umbenennt.
+    file = path.join(dir, 'pvetools.sqlite');
+    const old = path.join(dir, 'disktool.sqlite');
+    if (!existsSync(file) && existsSync(old)) file = old;
+  }
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
   db.exec(SCHEMA);

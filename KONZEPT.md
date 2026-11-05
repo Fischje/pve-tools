@@ -1,4 +1,4 @@
-# pve-disk-tool – Konzept
+# PVE-Tools – Konzept
 
 Eine kleine, nur im LAN erreichbare Website, die den Zustand der Festplatten (HDD, SATA-SSD,
 NVMe) von Proxmox VE und Proxmox Backup Server so zeigt, dass es auch Laien verstehen.
@@ -375,7 +375,7 @@ Aufbewahrung: Stündliche Werte 90 Tage, danach tägliche Werte ohne Rohdaten.
 ## Geplante Repo-Struktur
 
 ```
-pve-disk-tool/
+pve-tools/
 ├─ KONZEPT.md
 ├─ README.md
 ├─ src/            # Sammler, Bewertung, Server

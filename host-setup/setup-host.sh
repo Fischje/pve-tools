@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Richtet auf einem Proxmox-Host (PVE/PBS) den eingeschränkten SSH-Zugang für pve-disk-tool ein.
+# Richtet auf einem Proxmox-Host (PVE/PBS) den eingeschränkten SSH-Zugang für PVE-Tools ein.
 #
 # Zweck: Legt den Benutzer "diskmon" an, installiert das Prüfskript nach /etc/diskmon/gate.sh und erlaubt dem
 #        Schlüssel des Tools genau dieses Skript (sudoers + authorized_keys mit festem Befehl).
@@ -85,7 +85,7 @@ fi
 
 tmp="$(mktemp)"
 cat > "$tmp" <<SUDO
-# pve-disk-tool: Benutzer $BENUTZER darf nur das Prüfskript als root ausführen.
+# PVE-Tools: Benutzer $BENUTZER darf nur das Prüfskript als root ausführen.
 Defaults:$BENUTZER env_keep += "SSH_ORIGINAL_COMMAND"
 Defaults:$BENUTZER !requiretty
 $BENUTZER ALL=(root) NOPASSWD: $ZIEL/gate.sh

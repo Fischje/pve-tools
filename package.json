@@ -1,5 +1,5 @@
 {
-  "name": "pve-disk-tool",
+  "name": "pve-tools",
   "version": "0.1.0",
   "description": "LAN-Dashboard für Festplattengesundheit von Proxmox VE und Proxmox Backup Server",
   "type": "module",
