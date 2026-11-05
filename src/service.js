@@ -188,7 +188,8 @@ function backupControl(engine) {
   const o = engine.orch, s = o.settings(), db = engine.db;
   const label = (id) => engine.hosts.find((h) => h.id === id)?.label ?? id;
   return {
-    settings: { mode: s.mode, pbsHostId: s.pbsHostId, storage: s.storage, waitAfterBootMin: s.waitAfterBootMin, shutdown: s.shutdown, hostWaitMin: s.hostWaitMin },
+    lastSkip: iso(Number(db.getSetting('backup_lastskip') ?? 0) || null),
+    settings: { mode: s.mode, pbsHostId: s.pbsHostId, storage: s.storage, backupDays: s.backupDays, waitAfterBootMin: s.waitAfterBootMin, shutdown: s.shutdown, hostWaitMin: s.hostWaitMin },
     hostChoices: engine.hosts.map((h) => ({ id: h.id, label: h.label ?? h.id, kind: h.kind ?? 'fest' })),
     pbs: { id: s.pbsHostId, label: label(s.pbsHostId), reachable: !!db.getHostState(s.pbsHostId)?.reachable, rightShutdown: engine.hostRights(s.pbsHostId).includes('herunterfahren') },
     hosts: o.order(s).map((id) => ({ id, label: label(id), right: engine.hostRights(id).includes('backup-starten'), reachable: !!db.getHostState(id)?.reachable, ...o.selection(id, s),

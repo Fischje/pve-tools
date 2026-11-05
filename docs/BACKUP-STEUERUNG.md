@@ -84,6 +84,8 @@ Das Tool ersetzt den Orchestrator auf dem PBS (`pbs-run-backups.sh`). Es läuft 
 
 **Ablauf**
 1. Der PBS (Host-Art „manuell“, wird von Hand oder automatisch eingeschaltet) fährt hoch. Das Tool erkennt den neuen Boot über die Laufzeit.
+   Gesichert wird nur, wenn der PBS an einem **Backup-Tag** hochgefahren ist (Voreinstellung: Montag, einstellbar). An anderen Tagen
+   sichert das Tool nicht und fährt den PBS auch nicht herunter: Er bleibt an, bis ihr ihn ausschaltet. „Jetzt Backup starten“ geht an jedem Tag.
 2. Nach der **Wartezeit** (Voreinstellung 20 Minuten wie bisher) beginnt der Lauf. Pro Boot gibt es genau einen Lauf.
 3. Host für Host, in der festen Reihenfolge (Voreinstellung wie im alten Skript: `router`, dann `pve`): Ist der Host nicht erreichbar oder der Speicher `pbs` dort nicht aktiv, wartet das Tool
    (höchstens „Wartezeit auf einen Host“, Voreinstellung 30 Minuten) und überspringt den Host dann mit Fehler. Läuft auf dem Host schon ein vzdump (etwa vom alten Skript), wird er **übernommen**
@@ -93,7 +95,7 @@ Das Tool ersetzt den Orchestrator auf dem PBS (`pbs-run-backups.sh`). Es läuft 
    die Ursache („Verbindung zum PBS fehlte oder brach ab“).
 6. Während auf einem Host ein vom Tool gesteuertes Backup läuft, startet das Tool dort keine Platten-Tests.
 
-**Einstellungen** (Reiter „Backups & Snapshots“, „Backup-Lauf“): Betriebsart „beobachten“ oder „steuern“, PBS-Host, Speichername, Wartezeiten, Herunterfahren an/aus, je Host die Auswahl der Gäste.
+**Einstellungen** (Reiter „Backups & Snapshots“, „Backup-Lauf“): Betriebsart „beobachten“ oder „steuern“, Backup-Tage, PBS-Host, Speichername, Wartezeiten, Herunterfahren an/aus, je Host die Auswahl der Gäste.
 Gespeichert wird eine **Ausschlussliste** (wie `--all --exclude`), deshalb werden neue Gäste automatisch mitgesichert. Voreinstellung für `pve`: Ausschluss von 109, 112, 113, 114, 116, 119, 117, 159, 161, 171
 (aus dem alten Skript übernommen).
 

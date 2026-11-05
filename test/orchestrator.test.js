@@ -7,7 +7,7 @@ import { DemoWorld, DemoTransport } from '../src/demo/world.js';
 import { Notifier } from '../src/notify.js';
 import { cleanBackupSettings } from '../src/orchestrator.js';
 
-async function setup() {
+async function setup({ allDays = true } = {}) {
   let t = new Date(2026, 10, 3, 9, 0).getTime();
   const clock = () => new Date(t);
   const world = new DemoWorld(clock, { testMinutes: 10 });
@@ -23,6 +23,8 @@ async function setup() {
   /** Neuer Boot des PBS: aus, wieder an, Wartezeit abwarten. */
   const bootPbs = async (waitMin = 21) => { world.setUp('pbs', false); await engine.pollHost('pbs'); world.setUp('pbs', true); await engine.pollHost('pbs'); await advance(waitMin); };
   const calls = (id) => (world.state.get(id).snapCalls ?? []).filter((c) => /^(backup-start|poweroff)/.test(c));
+  // Die meisten Tests laufen an einem Dienstag: dafür alle Tage als Backup-Tage. Die Voreinstellung (nur Montag) prüft ein eigener Test.
+  if (allDays) engine.orch.save({ backupDays: [0, 1, 2, 3, 4, 5, 6] });
   return { world, db, engine, notifier, mails, advance, bootPbs, calls, o: engine.orch };
 }
 
@@ -192,4 +194,31 @@ test('Von Hand starten: nur bei erreichbarem PBS und nie doppelt', async () => {
   world.setUp('pbs', false);
   const { engine } = o; await engine.pollHost('pbs');
   await assert.rejects(() => o.startNow(), /nicht erreichbar/);
+});
+
+test('Backup-Tage: Voreinstellung Montag; an anderen Tagen wird nicht gesichert, der PBS bleibt an, „Jetzt Backup starten“ geht weiter', async () => {
+  const { o, bootPbs, calls, world, db } = await setup({ allDays: false }); // Dienstag, 3.11.2026
+  assert.deepEqual(o.settings().backupDays, [1]);
+  o.save({ mode: 'steuern' });
+  await bootPbs(); await o.tick();
+  assert.equal(o.job(), null, 'kein Lauf an einem Dienstag');
+  assert.deepEqual(calls('router'), []); assert.deepEqual(calls('pbs'), []);
+  assert.equal(world.state.get('pbs').up, true, 'PBS bleibt an');
+  assert.ok(db.getSetting('backup_lastskip'));
+  await o.tick(); assert.equal(o.job(), null, 'auch beim nächsten Takt nicht');
+  const plan = await o.dryRun();
+  assert.ok(plan.notes.some((n) => /kein Backup-Tag/.test(n)));
+  const j = await o.startNow();
+  assert.equal(j.manual, true, 'von Hand geht es trotzdem');
+});
+
+test('Backup-Tage sind einstellbar, ungültige Tage werden abgelehnt', async () => {
+  const { o, bootPbs, calls } = await setup({ allDays: false });
+  assert.throws(() => o.save({ backupDays: [7] }), /Backup-Tage/);
+  assert.throws(() => o.save({ backupDays: 'mo' }), /Backup-Tage/);
+  o.save({ mode: 'steuern', backupDays: [2, 2, 1] });
+  assert.deepEqual(o.settings().backupDays, [1, 2]);
+  await bootPbs(); await o.tick();
+  assert.equal(o.job().phase, 'läuft', 'Dienstag ist jetzt Backup-Tag');
+  assert.deepEqual(calls('router'), ['backup-start pbs all']);
 });

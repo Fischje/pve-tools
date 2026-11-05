@@ -7,10 +7,12 @@
 import { summarizeRun } from './backups.js';
 
 const MIN = 60000;
-const SETTINGS_KEY = 'backupctl', JOB_KEY = 'backupjob', LAST_KEY = 'backupjob_last', BOOT_KEY = 'backup_lastboot';
+const SETTINGS_KEY = 'backupctl', JOB_KEY = 'backupjob', LAST_KEY = 'backupjob_last', BOOT_KEY = 'backup_lastboot', SKIP_KEY = 'backup_lastskip';
 // Voreinstellung aus dem bisherigen Orchestrator (pbs-run-backups.sh): router alle, pve alle außer dieser Gäste.
 const SEEDED_EXCLUDES = { pve: [109, 112, 113, 114, 116, 119, 117, 159, 161, 171] };
-export const DEFAULTS = { mode: 'beobachten', pbsHostId: '', storage: 'pbs', waitAfterBootMin: 20, shutdown: true, hostWaitMin: 30, order: null, hosts: {} };
+// Backup-Tage: 0 = Sonntag … 6 = Samstag. Voreinstellung Montag, wie bisher (der PBS geht montags automatisch an).
+export const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+export const DEFAULTS = { mode: 'beobachten', pbsHostId: '', storage: 'pbs', backupDays: [1], waitAfterBootMin: 20, shutdown: true, hostWaitMin: 30, order: null, hosts: {} };
 
 const FINAL = new Set(['ok', 'fehler', 'fehlt', 'übersprungen']);
 
@@ -24,6 +26,10 @@ export function cleanBackupSettings(input, hostIds = []) {
   if ('waitAfterBootMin' in input) out.waitAfterBootMin = int(input.waitAfterBootMin, 0, 240, 'Wartezeit nach dem Hochfahren (Minuten)');
   if ('hostWaitMin' in input) out.hostWaitMin = int(input.hostWaitMin, 1, 240, 'Wartezeit auf einen Host (Minuten)');
   if ('shutdown' in input) out.shutdown = !!input.shutdown;
+  if ('backupDays' in input) {
+    if (!Array.isArray(input.backupDays) || input.backupDays.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) throw new Error('Backup-Tage: ungültig');
+    out.backupDays = [...new Set(input.backupDays)].sort((a, b) => a - b);
+  }
   if ('order' in input) {
     if (!Array.isArray(input.order) || input.order.some((x) => !hostIds.includes(x)) || new Set(input.order).size !== input.order.length) throw new Error('Reihenfolge: ungültig');
     out.order = input.order;
@@ -107,6 +113,14 @@ export class Orchestrator {
       if (up < s.waitAfterBootMin) return;
       const last = Number(this.db.getSetting(BOOT_KEY) ?? 0);
       if (Math.abs(boot - last) < 10 * MIN) return; // dieser Boot wurde schon behandelt
+      // Kein Backup-Tag (maßgeblich ist der Tag, an dem der PBS hochgefahren ist): diesen Boot merken, nichts sichern, PBS bleibt an.
+      const day = new Date(boot).getDay();
+      if (!s.backupDays.includes(day)) {
+        this.db.setSetting(BOOT_KEY, String(Math.round(boot)));
+        this.db.setSetting(SKIP_KEY, String(Math.round(boot)));
+        this.engine.event(s.pbsHostId, null, `PBS hochgefahren an einem ${WEEKDAYS[day]}: kein Backup-Tag, es wird nicht automatisch gesichert. Der PBS bleibt an („Jetzt Backup starten“ geht weiter von Hand).`);
+        return;
+      }
       await this.advance(this.begin(s, { bootAt: Math.round(boot), manual: false }), s);
     } catch (e) { this.engine.log(`Backup-Steuerung: ${e.stack ?? e.message}`); } finally { this.running = false; }
   }
@@ -241,6 +255,8 @@ export class Orchestrator {
       rows.push(row);
     }
     if (s.shutdown && pbs && !this.engine.hostRights(pbs.id).includes('herunterfahren')) problems.push(`${pbs.label ?? pbs.id}: Recht „Herunterfahren“ fehlt. Der PBS würde nach dem Lauf anbleiben.`);
-    return { storage: s.storage, shutdown: s.shutdown, hosts: rows, problems };
+    const today = this.now().getDay();
+    const notes = s.backupDays.includes(today) ? [] : [`Heute (${WEEKDAYS[today]}) ist kein Backup-Tag: Wird der PBS heute eingeschaltet, sichert das Tool nicht automatisch.`];
+    return { storage: s.storage, shutdown: s.shutdown, backupDays: s.backupDays, hosts: rows, problems, notes };
   }
 }

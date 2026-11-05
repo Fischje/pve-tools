@@ -198,7 +198,9 @@ function laufTab(b) {
   const field = (type, v, extra = {}) => h('input', { type, value: v, ...extra });
   const f = { pbs: h('select', {}, c.hostChoices.map((x) => h('option', { value: x.id, selected: x.id === s.pbsHostId }, x.label))), storage: field('text', s.storage, { size: 10 }),
     wait: field('number', s.waitAfterBootMin, { min: 0, max: 240, style: 'width:6em' }), hostWait: field('number', s.hostWaitMin, { min: 1, max: 240, style: 'width:6em' }),
-    shutdown: h('input', { type: 'checkbox', checked: s.shutdown }) };
+    shutdown: h('input', { type: 'checkbox', checked: s.shutdown }),
+    days: [1, 2, 3, 4, 5, 6, 0].map((d) => ({ d, box: h('input', { type: 'checkbox', checked: s.backupDays.includes(d) }) })) };
+  const dayNames = (list) => [1, 2, 3, 4, 5, 6, 0].filter((d) => list.includes(d)).map((d) => WD[d]).join(', ');
   // Gäste je Host: Haken = wird gesichert. Gespeichert wird die Ausschlussliste, damit neue Gäste automatisch mitgesichert werden (wie --all).
   const picks = new Map(c.hosts.map((x) => [x.id, {
     enabled: h('input', { type: 'checkbox', checked: x.enabled }),
@@ -206,7 +208,7 @@ function laufTab(b) {
     unknown: x.select === 'exclude' ? x.ids.filter((id) => !x.guests.some((g) => g.vmid === id)) : [],
   }]));
   const collect = () => ({
-    storage: f.storage.value.trim(), pbsHostId: f.pbs.value, waitAfterBootMin: Number(f.wait.value), hostWaitMin: Number(f.hostWait.value), shutdown: f.shutdown.checked,
+    storage: f.storage.value.trim(), pbsHostId: f.pbs.value, backupDays: f.days.filter((x) => x.box.checked).map((x) => x.d), waitAfterBootMin: Number(f.wait.value), hostWaitMin: Number(f.hostWait.value), shutdown: f.shutdown.checked,
     hosts: Object.fromEntries(c.hosts.map((x) => { const p = picks.get(x.id); const off = [...p.boxes.filter((y) => !y.box.checked).map((y) => y.g.vmid), ...p.unknown]; return [x.id, { enabled: p.enabled.checked, select: 'exclude', ids: off }]; })),
   });
   const out = h('div', {});
@@ -216,6 +218,7 @@ function laufTab(b) {
       await ctx.api('POST', '/api/backups/control', { action: 'settings', settings: collect() });
       const { plan } = await ctx.api('POST', '/api/backups/control', { action: 'dryrun' });
       out.replaceChildren(h('section', { class: 'panel' }, h('h2', {}, `Trockenlauf: so würde gesichert (Speicher „${plan.storage}“)`),
+        (plan.notes ?? []).map((n) => h('div', { class: 'finding info' }, n)),
         plan.problems.length ? h('div', { class: 'finding critical' }, h('ul', { class: 'plain' }, plan.problems.map((p) => h('li', {}, p)))) : h('div', { class: 'finding ok' }, 'Keine Probleme gefunden.'),
         plan.hosts.map((x) => h('div', { class: 'form-sec' }, h('h3', {}, `${x.label}: ${x.enabled ? `${x.guests.length} Gäste${x.excluded ? `, ${x.excluded} ausgenommen` : ''}` : 'ausgeschaltet'}${x.reachable ? '' : ' (gerade nicht erreichbar)'}`),
           h('div', { class: 'sub' }, h('code', {}, x.command)), h('p', {}, x.guests.map((g) => `${g.vmid} ${g.name}`).join(', ') || '–'))),
@@ -228,7 +231,7 @@ function laufTab(b) {
   const status = h('section', { class: 'panel' }, h('h2', {}, 'Status'),
     h('div', { class: `finding ${steuern ? 'ok' : 'info'}` },
       h('b', {}, steuern ? 'Das Tool steuert die Backup-Läufe' : 'Das Tool beobachtet nur (der bisherige Orchestrator auf dem PBS läuft)'),
-      h('div', { class: 'sub' }, steuern ? `Nach dem Hochfahren des PBS (${c.pbs.label}) wartet das Tool ${s.waitAfterBootMin} min und sichert dann Host für Host. Der PBS wird nur nach vollständigem Erfolg heruntergefahren${s.shutdown ? '' : ' (ausgeschaltet: er bleibt immer an)'}.` : 'Zuerst Einstellungen und Trockenlauf prüfen. Dann auf „Das Tool steuert“ umstellen und auf dem PBS den alten Orchestrator abschalten (Cron @reboot auskommentieren).'),
+      h('div', { class: 'sub' }, steuern ? `${s.backupDays.length ? `Backup-Tage: ${dayNames(s.backupDays)}.` : 'Keine Backup-Tage gewählt: es wird nur von Hand gesichert.'} Fährt der PBS an einem Backup-Tag hoch, wartet das Tool ${s.waitAfterBootMin} min und sichert dann Host für Host. An anderen Tagen bleibt er an, ohne zu sichern. Nach dem Lauf wird der PBS nur nach vollständigem Erfolg heruntergefahren${s.shutdown ? '' : ' (ausgeschaltet: er bleibt immer an)'}.` : 'Zuerst Einstellungen und Trockenlauf prüfen. Dann auf „Das Tool steuert“ umstellen und auf dem PBS den alten Orchestrator abschalten (Cron @reboot auskommentieren).'),
       h('div', { class: 'actions' },
         steuern ? h('button', { onclick: () => act({ action: 'settings', settings: { mode: 'beobachten' } }, 'Das Tool beobachtet nur.') }, 'Zurück auf „nur beobachten“')
           : h('button', { class: 'primary', onclick: () => { if (confirm('Das Tool steuert ab jetzt die Backups. Hast du den alten Orchestrator auf dem PBS abgeschaltet?')) act({ action: 'settings', settings: { mode: 'steuern' } }, 'Das Tool steuert die Backups.'); } }, 'Das Tool steuert'),
@@ -240,6 +243,9 @@ function laufTab(b) {
     h('div', { class: 'form-grid' }, h('label', { class: 'f' }, 'PBS-Host (wird heruntergefahren)', f.pbs), h('label', { class: 'f' }, 'Speicher auf den Hosts', f.storage),
       h('label', { class: 'f' }, 'Wartezeit nach dem Hochfahren des PBS (Minuten)', f.wait), h('label', { class: 'f' }, 'Höchstens so lange auf einen Host oder Speicher warten (Minuten)', f.hostWait)),
     h('p', {}, h('label', {}, f.shutdown, ' PBS nach vollständigem Erfolg herunterfahren')),
+    h('div', { class: 'f' }, h('span', {}, 'Backup-Tage: An diesen Tagen sichert das Tool automatisch, wenn der PBS hochfährt. An anderen Tagen bleibt der PBS an, ohne zu sichern.'),
+      h('div', { class: 'checks big' }, f.days.map(({ d, box }) => h('label', {}, box, ` ${WD[d]}`)))),
+    c.lastSkip ? h('p', { class: 'sub' }, `Zuletzt ohne Backup hochgefahren (kein Backup-Tag): ${fmtDT(c.lastSkip)}.`) : null,
     !c.pbs.rightShutdown ? h('p', { class: 'sub bad' }, `Auf ${c.pbs.label} ist das Recht „Herunterfahren“ nicht freigegeben (Reiter Hosts einrichten).`) : null);
 
   // Auswahl der Gäste: ein Host nach dem anderen, ohne die Haken der anderen zu verlieren
