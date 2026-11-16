@@ -303,3 +303,18 @@ test('Automatisch einschalten an Backup-Tagen: ab der Uhrzeit, bis zu drei Versu
   o.save({ autoWake: false });
   t = new Date(2026, 10, 16, 8, 5).getTime(); await o.tick(); assert.equal(sent.length, 4, 'ausgeschaltet');
 });
+
+test('Altes Prüfskript (vor Version 10) und eine Auswahl von Gästen: klarer Fehler statt „unerlaubte Zeichen“, Trockenlauf warnt', async () => {
+  const { o, engine, calls, world, bootPbs, advance } = await setup();
+  const hs = engine.db.getHostState('pve'); engine.db.setHostState('pve', { ...hs, gateVersion: 9 });
+  const plan = await o.dryRun();
+  assert.ok(plan.problems.some((p) => /pve: Prüfskript zu alt/.test(p)), plan.problems.join(' | '));
+  const origPoll = engine.pollHost.bind(engine);
+  engine.pollHost = async (id, opt) => { await origPoll(id, opt); if (id === 'pve') { const x = engine.db.getHostState('pve'); engine.db.setHostState('pve', { ...x, gateVersion: 9 }); } };
+  await bootPbs(); await o.tick(); await advance(31); await o.tick();
+  const pve = o.job().hosts.find((h) => h.id === 'pve');
+  assert.equal(pve.state, 'fehler');
+  assert.match(pve.note, /Version 10/);
+  assert.deepEqual(calls('pve'), []);
+  assert.equal(world.state.get('pbs').up, true);
+});

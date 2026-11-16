@@ -206,7 +206,11 @@ export class Orchestrator {
         const tasks = await client.backupTasks();
         const running = tasks.find((t) => t.start && !t.end && now - t.start < 36 * 3600e3);
         if (running) { Object.assign(cur, { state: 'läuft', startedAt: now, upid: running.upid, note: 'bereits laufendes Backup übernommen' }); }
-        else { await client.backupStart(s.storage, sel); Object.assign(cur, { state: 'läuft', startedAt: now, note: '' }); }
+        else {
+          // Prüfskripte vor Version 10 lehnen das Komma in Gast-Listen ab („unerlaubte Zeichen“): klar sagen, was zu tun ist.
+          if (sel.select !== 'all' && (this.db.getHostState(cur.id)?.gateVersion ?? 0) < 10) throw Object.assign(new Error('Das Prüfskript auf diesem Host ist zu alt für eine Auswahl von Gästen (Version 10 nötig). Bitte „Skript aktualisieren“.'), { fatal: true });
+          await client.backupStart(s.storage, sel); Object.assign(cur, { state: 'läuft', startedAt: now, note: '' });
+        }
         this.engine.event(cur.id, null, `Backup gestartet${running ? ' (übernommen)' : ''}`);
         this.saveJob(job); return;
       }
@@ -238,6 +242,7 @@ export class Orchestrator {
       }
     } catch (e) {
       cur.note = e.message;
+      if (e.fatal) { cur.state = 'fehler'; this.engine.event(cur.id, null, `Backup-Steuerung: ${e.message}`); this.saveJob(job); return this.advance(job, s); }
       if (now - cur.since > s.hostWaitMin * MIN) { cur.state = 'fehler'; this.engine.event(cur.id, null, `Backup-Steuerung: ${e.message}`); }
       this.saveJob(job);
     }
@@ -358,6 +363,7 @@ export class Orchestrator {
         command: `vzdump ${sel.select === 'all' ? '--all 1' : sel.select === 'exclude' ? `--all 1 --exclude ${sel.ids.join(',')}` : sel.ids.join(' ')} --storage ${s.storage} --mode snapshot --compress zstd` };
       if (sel.enabled) {
         if (!row.right) problems.push(`${row.label}: Recht „Backups starten“ ist nicht freigegeben.`);
+        else if (sel.select !== 'all' && (hs?.gateVersion ?? 0) < 10) problems.push(`${row.label}: Prüfskript zu alt für die Auswahl von Gästen (Version 10 nötig), bitte „Skript aktualisieren“.`);
         else if (!row.reachable) problems.push(`${row.label}: nicht erreichbar (jetzt).`);
         else if (row.storageActive === false) problems.push(`${row.label}: Speicher „${s.storage}“ ist nicht aktiv (PBS aus?).`);
       }

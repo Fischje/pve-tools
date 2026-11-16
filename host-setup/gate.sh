@@ -40,13 +40,14 @@
 set -euo pipefail
 
 # Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
-GATE_VERSION=9
+GATE_VERSION=10
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
 cmd="${SSH_ORIGINAL_COMMAND:-}"
 [[ -n "$cmd" ]] || fail "kein Befehl"
-[[ "$cmd" =~ ^[A-Za-z0-9/\ :@._-]+$ ]] || fail "unerlaubte Zeichen"
+# Erlaubt: Buchstaben, Ziffern und / : @ . _ - , sowie Leerzeichen (Komma für Listen von Gast-IDs). Keine Shell-Sonderzeichen.
+[[ "$cmd" =~ ^[A-Za-z0-9/\ :@._,-]+$ ]] || fail "unerlaubte Zeichen"
 read -r -a a <<< "$cmd"
 
 dev_ok() {
