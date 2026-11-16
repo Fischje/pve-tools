@@ -449,6 +449,21 @@ function loginView() {
   return h('div', { class: 'panel login' }, h('h2', {}, BRAND), h('p', { class: 'sub' }, 'Bitte Passwort eingeben.'), h('label', { class: 'f' }, 'Passwort', pw), msg, h('div', { class: 'row' }, h('button', { class: 'primary', onclick: go }, 'Anmelden')));
 }
 
+/** Änderungen (CHANGELOG.md) im Dialog: die letzten 6 Versionen, auf Wunsch alle. */
+async function openChangelog(all = false) {
+  let c;
+  try { c = await api('GET', `/api/changelog${all ? '?alle=1' : ''}`); } catch (e) { flash = { err: e.message }; render(); return; }
+  document.querySelector('dialog.changelog')?.close();
+  dialogOpen = true;
+  const dlg = h('dialog', { class: 'changelog', 'aria-label': 'Änderungen', onclose: () => { dialogOpen = false; dlg.remove(); render(); } },
+    h('div', { class: 'dlg-head' }, h('div', {}, h('h2', {}, 'Was ist neu?'), h('div', { class: 'sub' }, `Installiert: Version ${c.version}`)), h('button', { onclick: () => dlg.close() }, 'Schließen')),
+    h('div', { class: 'dlg-body' },
+      c.entries.map((e, i) => h('section', { class: 'cl-entry' }, h('h3', {}, `Version ${e.version}`, e.date ? h('span', { class: 'sub' }, ` · ${fmtDate(e.date)}`) : null, i === 0 && e.version === c.version ? h('span', { class: 'pill ok' }, 'installiert') : null),
+        h('ul', {}, e.items.map((t) => h('li', {}, t))))),
+      h('div', { class: 'row' }, !all && c.total > c.entries.length ? h('button', { onclick: () => openChangelog(true) }, `Alle ${c.total} Versionen anzeigen`) : null, h('span', { class: 'spacer' }), h('button', { class: 'primary', onclick: () => dlg.close() }, 'Schließen'))));
+  document.body.append(dlg); dlg.showModal();
+}
+
 function render() {
   if (dialogOpen) return;
   if (!authState.loggedIn) { root.replaceChildren(loginView()); return; }
@@ -460,7 +475,7 @@ function render() {
   const scrollY = window.scrollY;
   root.replaceChildren(...[
     h('header', { class: 'top' },
-      h('div', { class: 'brand' }, h('b', {}, BRAND), h('span', { class: 'sub' }, 'Platten, ZFS und Tests')),
+      h('div', { class: 'brand' }, h('b', {}, BRAND), data.version ? h('button', { class: 'version', title: 'Was ist neu? Änderungen anzeigen', onclick: () => openChangelog() }, `v${data.version}`) : null, h('span', { class: 'sub' }, 'Platten, ZFS, Backups und Snapshots')),
       h('div', { class: 'title-row' }, h('div', { class: 'summary' }, h('span', { class: `dot ${data.summary.level}`, 'aria-hidden': 'true' }), h('span', { role: 'status' }, data.summary.text)), h('span', { class: 'sub' }, `Stand ${fmtDT(data.now)}`)),
       h('nav', { class: 'tabs', 'aria-label': 'Bereiche' }, tabs.map(([id, t]) => h('button', { 'aria-current': view === id ? 'page' : null, onclick: () => { view = id; ui.dirty = false; render(); window.scrollTo(0, 0); } }, t))), pausedBar),
     !authState.passwordSet ? h('div', { class: 'banner warn' }, h('span', {}, 'Es ist noch kein Passwort gesetzt. Die Seite ist nur im lokalen Netz erreichbar, aber jeder dort kann Tests starten.'), h('button', { onclick: () => { ui.tabs.settings = 'konto'; view = 'zeitplan'; render(); } }, 'Passwort setzen')) : null,

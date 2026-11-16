@@ -387,3 +387,16 @@ test('Snapshot-Planung per API: speichern, Probelauf, ungültige Werte werden ab
   assert.equal((await call('POST', '/api/hosts/pve/snapshots', { action: 'dryrun', label: 'x;id' })).status, 400);
   await close();
 });
+
+test('Version und Änderungen: in der Übersicht und unter /api/changelog (letzte 6, auf Wunsch alle)', async () => {
+  const { call, close } = await boot();
+  const pkg = JSON.parse((await import('node:fs')).readFileSync('package.json', 'utf8'));
+  assert.equal((await call('GET', '/api/overview')).json.version, pkg.version);
+  const c = (await call('GET', '/api/changelog')).json;
+  assert.equal(c.version, pkg.version);
+  assert.ok(c.entries.length <= 6 && c.entries.length > 0);
+  assert.equal(c.entries[0].version, pkg.version);
+  const all = (await call('GET', '/api/changelog?alle=1')).json;
+  assert.equal(all.entries.length, all.total);
+  await close();
+});

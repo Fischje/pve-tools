@@ -1,0 +1,45 @@
+# Changelog
+
+Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
+Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
+
+## 0.6.3 – 2026-11-16
+- Versionsnummer oben auf der Seite; ein Klick darauf zeigt die letzten Änderungen.
+
+## 0.6.2 – 2026-11-16
+- Backup-Lauf: Gast-Listen mit Komma (z. B. die Ausschlussliste von pve) werden vom Prüfskript angenommen (Prüfskript Version 10).
+- Klarer Hinweis, wenn ein Host für die Auswahl von Gästen ein neueres Prüfskript braucht. Der Trockenlauf meldet das schon vorher.
+
+## 0.6.1 – 2026-11-05
+- Hosts der Art „manuell“: Das Tagesende gilt nur für Tests. Die Hinweise sagen nicht mehr, der Host schalte sich selbst ab.
+
+## 0.6.0 – 2026-11-05
+- Das Tool steuert die Backup-Läufe immer (keine Betriebsart „beobachten“ mehr).
+- Backup-Tage einstellbar (Voreinstellung Montag). Nur nach dem geplanten Lauf an einem Backup-Tag wird der PBS heruntergefahren.
+- „Jetzt Backup starten …“ mit Auswahl der Hosts und Gäste; danach bleibt der PBS an.
+- PBS ein- und ausschalten: Wake-on-LAN (auch automatisch an Backup-Tagen) und sauberes Herunterfahren per Knopf.
+
+## 0.5.1 – 2026-11-05
+- Kennzahl-Kästen sind anklickbar und führen zur passenden Detailansicht.
+- Neue Namen im LXC (/opt/pve-tools, Dienst pve-tools) mit einmaligem Umzugsskript.
+- Startseite ohne die Balken „Tage seit dem letzten Test“.
+
+## 0.5.0 – 2026-11-04
+- Oberfläche neu aufgeteilt: Unterreiter statt langer Seiten, große Klappbereiche, die offen bleiben.
+- Keine automatische Aktualisierung, während in einem Formular etwas geändert wird.
+- Füllstand der ZFS-Pools je Host auf der Startseite.
+
+## 0.4.0 – 2026-11-02
+- Snapshots löst das Tool selbst aus (statt Cron auf dem Host), mit Planung, Aufbewahrung und Probelauf.
+- Backup-Lauf durch das Tool: Host für Host, Warten über die Aufgabenliste, Herunterfahren des PBS nur bei Erfolg.
+- Erkennung von Verbindungsfehlern (steigender CRC-Zähler, Kernel-Meldungen zu SATA/NVMe) mit Mail.
+
+## 0.3.0 – 2026-11-02
+- Backups und Snapshots: Gäste, Snapshot-Stand, Backup-Läufe mit Ergebnis je Gast und Ursache bei Fehlern.
+
+## 0.2.0 – 2026-11-02
+- E-Mail-Benachrichtigung, Statistiken, Abfragerhythmus einstellbar.
+- Automatischer Abgleich mit GitHub alle 5 Minuten, mit Tests und Rückfall bei Fehlern.
+
+## 0.1.0 – 2026-11-01
+- Erste Version: Zustand der Platten (HDD, SATA-SSD, NVMe) und ZFS-Pools, Selbsttests nach Zeitplan, Einrichtung der Hosts in der Oberfläche.

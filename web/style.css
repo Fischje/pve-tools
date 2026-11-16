@@ -211,3 +211,9 @@ button.kpi.link:hover .kpi-go { color: var(--accent); }
 [id] { scroll-margin-top: 150px; }
 .flash { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: var(--radius); transition: outline-color 1.2s; }
 @media (prefers-reduced-motion: reduce) { button.kpi.link { transition: none; } button.kpi.link:hover { transform: none; } }
+
+/* ---- Versionsnummer und Änderungen ---- */
+button.version { border: 1px solid var(--line); background: var(--panel2); color: var(--muted); border-radius: 99px; padding: 1px 10px; font-size: .8rem; font-variant-numeric: tabular-nums; }
+button.version:hover { color: var(--accent); border-color: var(--accent); }
+.cl-entry { border-bottom: 1px solid var(--line); padding: 8px 0 10px; } .cl-entry:last-of-type { border: 0; }
+.cl-entry h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .cl-entry ul { margin: 6px 0 0; padding-left: 20px; } .cl-entry li { margin: 3px 0; }

@@ -1,4 +1,5 @@
 // Webserver (nur LAN) mit Passwortschutz, API und Zeitplan-Schleife.
+import { loadChangelog } from './changelog.js';
 import http from 'node:http';
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -18,6 +19,9 @@ export { isPrivateIp };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WEB = path.join(ROOT, 'web');
+// Versionsnummer und Änderungen: einmal beim Start gelesen (ein Update startet den Dienst ohnehin neu).
+const CHANGES = loadChangelog(path.join(ROOT, 'CHANGELOG.md'));
+export const VERSION = CHANGES[0]?.version ?? '0.0.0';
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 
 export function createApp({ db, engine, auth, allowPublic = false, provisioner = null, notifier = engine.notifier ?? null }) {
@@ -79,7 +83,8 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       } catch (e) { auth.noteFail(key); return send(res, 400, { error: e.message }); }
       return send(res, 404, { error: 'Nicht gefunden' });
     }
-    if (route === 'GET /api/overview') return send(res, 200, overview(engine));
+    if (route === 'GET /api/overview') return send(res, 200, { ...overview(engine), version: VERSION });
+    if (route === 'GET /api/changelog') return send(res, 200, { version: VERSION, entries: CHANGES.slice(0, Number(url.searchParams.get('alle')) ? 100 : 6), total: CHANGES.length });
     if (url.pathname.startsWith('/api/mail')) {
       if (!notifier) return send(res, 400, { error: 'E-Mail ist nicht verfügbar.' });
       if (route === 'GET /api/mail') return send(res, 200, notifier.publicConfig());
