@@ -208,6 +208,8 @@ export class Orchestrator {
         if (running) { Object.assign(cur, { state: 'läuft', startedAt: now, upid: running.upid, note: 'bereits laufendes Backup übernommen' }); }
         else {
           // Prüfskripte vor Version 10 lehnen das Komma in Gast-Listen ab („unerlaubte Zeichen“): klar sagen, was zu tun ist.
+          // Vor Version 11 liefert das Prüfskript nur beendete Aufgaben: das Tool sähe das laufende Backup nicht und gäbe nach 10 Minuten auf.
+          if ((this.db.getHostState(cur.id)?.gateVersion ?? 0) < 11) throw Object.assign(new Error('Das Prüfskript auf diesem Host ist zu alt für den Backup-Lauf (Version 11 nötig). Bitte „Skript aktualisieren“.'), { fatal: true });
           if (sel.select !== 'all' && (this.db.getHostState(cur.id)?.gateVersion ?? 0) < 10) throw Object.assign(new Error('Das Prüfskript auf diesem Host ist zu alt für eine Auswahl von Gästen (Version 10 nötig). Bitte „Skript aktualisieren“.'), { fatal: true });
           await client.backupStart(s.storage, sel); Object.assign(cur, { state: 'läuft', startedAt: now, note: '' });
         }
@@ -219,7 +221,7 @@ export class Orchestrator {
         const used = new Set(job.hosts.filter((h) => h !== cur && h.upid).map((h) => h.upid));
         const task = cur.upid ? tasks.find((t) => t.upid === cur.upid) : tasks.filter((t) => t.start >= cur.startedAt - 2 * MIN && !used.has(t.upid)).sort((a, b) => a.start - b.start)[0];
         if (!task) {
-          if (now - cur.startedAt > 10 * MIN) { cur.state = 'fehler'; cur.note = 'Auf dem Host erschien keine Backup-Aufgabe (nach 10 min).'; this.saveJob(job); return this.advance(job, s); }
+          if (now - cur.startedAt > 10 * MIN) { cur.state = 'fehler'; cur.note = 'Auf dem Host erschien keine Backup-Aufgabe (nach 10 min). Läuft das Backup trotzdem, steht es später unter „Backup-Läufe“; der PBS bleibt zur Sicherheit an.'; this.saveJob(job); return this.advance(job, s); }
           this.saveJob(job); return;
         }
         cur.upid = task.upid;
@@ -363,6 +365,7 @@ export class Orchestrator {
         command: `vzdump ${sel.select === 'all' ? '--all 1' : sel.select === 'exclude' ? `--all 1 --exclude ${sel.ids.join(',')}` : sel.ids.join(' ')} --storage ${s.storage} --mode snapshot --compress zstd` };
       if (sel.enabled) {
         if (!row.right) problems.push(`${row.label}: Recht „Backups starten“ ist nicht freigegeben.`);
+        else if ((hs?.gateVersion ?? 0) < 11) problems.push(`${row.label}: Prüfskript zu alt für den Backup-Lauf (Version 11 nötig), bitte „Skript aktualisieren“.`);
         else if (sel.select !== 'all' && (hs?.gateVersion ?? 0) < 10) problems.push(`${row.label}: Prüfskript zu alt für die Auswahl von Gästen (Version 10 nötig), bitte „Skript aktualisieren“.`);
         else if (!row.reachable) problems.push(`${row.label}: nicht erreichbar (jetzt).`);
         else if (row.storageActive === false) problems.push(`${row.label}: Speicher „${s.storage}“ ist nicht aktiv (PBS aus?).`);

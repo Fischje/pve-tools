@@ -304,7 +304,7 @@ test('Automatisch einschalten an Backup-Tagen: ab der Uhrzeit, bis zu drei Versu
   t = new Date(2026, 10, 16, 8, 5).getTime(); await o.tick(); assert.equal(sent.length, 4, 'ausgeschaltet');
 });
 
-test('Altes Prüfskript (vor Version 10) und eine Auswahl von Gästen: klarer Fehler statt „unerlaubte Zeichen“, Trockenlauf warnt', async () => {
+test('Altes Prüfskript: klarer Fehler statt „unerlaubte Zeichen“ oder „keine Backup-Aufgabe“, Trockenlauf warnt', async () => {
   const { o, engine, calls, world, bootPbs, advance } = await setup();
   const hs = engine.db.getHostState('pve'); engine.db.setHostState('pve', { ...hs, gateVersion: 9 });
   const plan = await o.dryRun();
@@ -314,7 +314,7 @@ test('Altes Prüfskript (vor Version 10) und eine Auswahl von Gästen: klarer Fe
   await bootPbs(); await o.tick(); await advance(31); await o.tick();
   const pve = o.job().hosts.find((h) => h.id === 'pve');
   assert.equal(pve.state, 'fehler');
-  assert.match(pve.note, /Version 10/);
+  assert.match(pve.note, /Version 11/);
   assert.deepEqual(calls('pve'), []);
   assert.equal(world.state.get('pbs').up, true);
 });

@@ -17,6 +17,13 @@ const fake = (name, body) => { writeFileSync(path.join(bin, name), `#!/usr/bin/e
 fake('systemd-run', `echo "systemd-run $*" >> "${P('aufrufe.log')}"`);
 fake('vzdump', 'exit 0');
 fake('pvesm', 'printf "Name Type Status Total Used Available %%\\n$3 pbs active 100 50 50 50%%\\n"');
+// Wie Proxmox: ohne --source all/active liefert die Aufgabenliste nur beendete Aufgaben, ein laufendes Backup fehlt dann.
+fake('pvesh', `if [[ "$*" == *"/tasks "* ]]; then
+  fin='{"upid":"UPID:pve:00000001:00000001:6A000000:vzdump::root@pam:","starttime":1793000000,"endtime":1793000600,"status":"OK","type":"vzdump"}'
+  run='{"upid":"UPID:pve:00000002:00000002:6A000100:vzdump::root@pam:","starttime":1793100000,"type":"vzdump"}'
+  if [[ "$*" == *"--source all"* || "$*" == *"--source active"* ]]; then echo "[$run,$fin]"; else echo "[$fin]"; fi
+fi`);
+fake('hostname', 'echo pve');
 fake('ip', 'echo "default via 192.168.1.1 dev vmbr0 proto kernel"');
 fake('ethtool', 'printf "Settings for $1:\\n\\tWake-on: g\\n"');
 writeFileSync(P('autosnap-run'), `#!/usr/bin/env bash\necho "autosnap-run $* FORCE=\${FORCE:-}" >> "${P('aufrufe.log')}"\n`); chmodSync(P('autosnap-run'), 0o755);
@@ -53,4 +60,11 @@ test('Weitere Befehle des Tools über das echte Prüfskript', async () => {
   const n = await client.netinfo();
   assert.equal(n.dev, 'vmbr0');
   await assert.rejects(() => client.backupStart('pbs', { select: 'exclude', ids: ['1;id'] }), /unerlaubte Zeichen|ungültige Liste/);
+});
+
+test('Aufgabenliste über das echte Prüfskript enthält auch das laufende Backup (sonst gibt das Tool nach 10 Minuten auf)', async () => {
+  const tasks = await client.backupTasks();
+  const running = tasks.filter((t) => t.start && !t.end);
+  assert.equal(running.length, 1, 'laufende Aufgabe fehlt: --source all im Prüfskript?');
+  assert.equal(tasks.length, 2);
 });

@@ -3,6 +3,10 @@
 Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
 Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
 
+## 0.6.4 – 2026-11-16
+- Backup-Lauf: Das Tool sieht jetzt auch das gerade laufende Backup auf einem Host. Bisher erschien es erst nach dem Ende, und das Tool meldete nach 10 Minuten „keine Backup-Aufgabe“.
+- Dafür ist das Prüfskript Version 11 nötig: auf router und pve „Skript aktualisieren“. Der Trockenlauf warnt, solange ein Host noch eine ältere Version hat.
+
 ## 0.6.3 – 2026-11-16
 - Versionsnummer oben auf der Seite; ein Klick darauf zeigt die letzten Änderungen.
 

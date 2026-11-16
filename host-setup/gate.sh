@@ -18,7 +18,7 @@
 # Nur lesend, für Backup- und Snapshot-Überwachung (nur auf PVE-Hosts):
 #   guests                       LXC und VMs dieses Knotens (JSON, mit Tags und Status)
 #   snapshots                    alle Snapshots aller Gäste dieses Knotens (JSON je Gast)
-#   tasks                        letzte vzdump-Aufgaben dieses Knotens (JSON)
+#   tasks                        letzte vzdump-Aufgaben dieses Knotens, laufende und beendete (JSON)
 #   tasklog <UPID>               Protokoll einer vzdump-Aufgabe (JSON)
 #   autosnap                     Zustand der Snapshot-Skripte (Schalter, Aufbewahrung, Cron, letzte Meldungen)
 #   rechte                       Welche Rechtegruppen für dieses Skript freigegeben sind (Datei /etc/diskmon/rechte)
@@ -40,7 +40,7 @@
 set -euo pipefail
 
 # Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
-GATE_VERSION=10
+GATE_VERSION=11
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
@@ -116,7 +116,8 @@ case "${a[0]}" in
   tasks)
     [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
     command -v pvesh >/dev/null 2>&1 || exit 0
-    exec pvesh get "/nodes/$(hostname -s)/tasks" --typefilter vzdump --limit 40 --output-format json ;;
+    # --source all: auch laufende Aufgaben (Standard wäre nur beendete, dann sieht das Tool ein laufendes Backup nicht).
+    exec pvesh get "/nodes/$(hostname -s)/tasks" --typefilter vzdump --source all --limit 40 --output-format json ;;
   tasklog)
     [[ ${#a[@]} -eq 2 ]] || fail "Argumente: tasklog <UPID>"
     [[ "${a[1]}" =~ ^UPID:[A-Za-z0-9._:@-]{10,200}$ ]] || fail "ungültige UPID"

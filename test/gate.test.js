@@ -40,7 +40,7 @@ test('Backup-Überwachung (nur lesend): Gäste, Snapshots, vzdump-Aufgaben, Prot
   assert.equal(g[1], 'qemu\t[]');
   const sn = run('snapshots').out.split('\n');
   assert.deepEqual(sn, ['lxc\t109\t[{"name":"current"}]', 'lxc\t112\t[{"name":"current"}]']);
-  assert.match(run('tasks').out, /tasks --typefilter vzdump --limit 40 --output-format json$/);
+  assert.match(run('tasks').out, /tasks --typefilter vzdump --source all --limit 40 --output-format json$/);
   const upid = 'UPID:pve:0000ABCD:0123ABCD:6543210A:vzdump::root@pam:';
   assert.match(run(`tasklog ${upid}`).out, /tasks\/UPID:pve:.*\/log --limit 20000/);
   assert.match(run('autosnap').out, /^schalter: (an|aus)/);

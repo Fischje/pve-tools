@@ -1,6 +1,6 @@
 {
   "name": "pve-tools",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "LAN-Dashboard für Festplattengesundheit von Proxmox VE und Proxmox Backup Server",
   "type": "module",
   "private": true,
