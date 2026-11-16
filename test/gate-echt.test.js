@@ -43,7 +43,7 @@ test('Backup starten über das echte Prüfskript: alle, Ausschlussliste mit Komm
   await client.backupStart('pbs', { select: 'exclude', ids: [109, 112, 113, 114, 116, 119, 117, 159, 161, 171] });
   await client.backupStart('pbs', { select: 'only', ids: [118, 121] });
   const l = log().filter((x) => x.startsWith('systemd-run'));
-  assert.match(l[0], /vzdump --all 1 --storage pbs --mode snapshot --compress zstd$/);
+  assert.match(l[0], /vzdump --all 1 --storage pbs --mode snapshot --compress zstd --notes-template \{\{guestname\}\}$/);
   assert.match(l[1], /vzdump --all 1 --exclude 109,112,113,114,116,119,117,159,161,171 --storage pbs/);
   assert.match(l[2], /vzdump 118 121 --storage pbs/);
 });

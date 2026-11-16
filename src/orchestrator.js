@@ -378,10 +378,11 @@ export class Orchestrator {
       if (hs?.reachable && this.engine.hostRights(id).includes('backup-starten')) { try { storage = await this.engine.client(id).storageActive(s.storage); } catch (e) { storage = { known: false, active: false, raw: e.message }; } }
       const row = { id, label: host?.label ?? id, enabled: sel.enabled, reachable: !!hs?.reachable, right: this.engine.hostRights(id).includes('backup-starten'), storageActive: storage?.active ?? null,
         select: sel.select, ids: sel.ids, guests: included.map((g) => ({ vmid: g.vmid, name: g.name, type: g.type, status: g.status })), excluded: guests.length - included.length,
-        command: `vzdump ${sel.select === 'all' ? '--all 1' : sel.select === 'exclude' ? `--all 1 --exclude ${sel.ids.join(',')}` : sel.ids.join(' ')} --storage ${s.storage} --mode snapshot --compress zstd` };
+        command: `vzdump ${sel.select === 'all' ? '--all 1' : sel.select === 'exclude' ? `--all 1 --exclude ${sel.ids.join(',')}` : sel.ids.join(' ')} --storage ${s.storage} --mode snapshot --compress zstd --notes-template {{guestname}}` };
       if (sel.enabled) {
         if (!row.right) problems.push(`${row.label}: Recht „Backups starten“ ist nicht freigegeben.`);
         else if ((hs?.gateVersion ?? 0) < 11) problems.push(`${row.label}: Prüfskript zu alt für den Backup-Lauf (Version 11 nötig), bitte „Skript aktualisieren“.`);
+        else if ((hs?.gateVersion ?? 0) < 12) problems.push(`${row.label}: Prüfskript älter als Version 12: Backups bekommen dort noch keinen Gastnamen als Notiz, bitte „Skript aktualisieren“.`);
         else if (sel.select !== 'all' && (hs?.gateVersion ?? 0) < 10) problems.push(`${row.label}: Prüfskript zu alt für die Auswahl von Gästen (Version 10 nötig), bitte „Skript aktualisieren“.`);
         else if (!row.reachable) problems.push(`${row.label}: nicht erreichbar (jetzt).`);
         else if (row.storageActive === false) problems.push(`${row.label}: Speicher „${s.storage}“ ist nicht aktiv (PBS aus?).`);

@@ -40,7 +40,7 @@
 set -euo pipefail
 
 # Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
-GATE_VERSION=11
+GATE_VERSION=12
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
@@ -195,7 +195,8 @@ case "${a[0]}" in
     [[ "${a[1]}" =~ ^[A-Za-z0-9_-]{1,32}$ ]] || fail "ungültiger Speichername"
     command -v vzdump >/dev/null 2>&1 || fail "vzdump fehlt (kein Proxmox-Host?)"
     ids_ok() { [[ "$1" =~ ^[0-9]{3,9}(,[0-9]{3,9}){0,63}$ ]] || fail "ungültige Liste: nur Gast-IDs, mit Komma getrennt"; }
-    base=(--storage "${a[1]}" --mode snapshot --compress zstd)
+    # Notiz an jedem Backup: der Name des Gastes (im PBS als Kommentar sichtbar, damit man später weiß, was in der ID lief).
+    base=(--storage "${a[1]}" --mode snapshot --compress zstd --notes-template "{{guestname}}")
     case "${a[2]}" in
       all)     [[ ${#a[@]} -eq 3 ]] || fail "all hat kein weiteres Argument"; cmd=(vzdump --all 1 "${base[@]}") ;;
       exclude) [[ ${#a[@]} -eq 4 ]] || fail "exclude braucht eine Liste"; ids_ok "${a[3]}"; cmd=(vzdump --all 1 --exclude "${a[3]}" "${base[@]}") ;;

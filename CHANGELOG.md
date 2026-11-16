@@ -3,6 +3,10 @@
 Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
 Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
 
+## 0.6.6 – 2026-11-16
+- Jedes Backup bekommt den Namen des Gastes als Notiz. Im PBS steht er in der Spalte „Comment“, so weiß man später, was hinter einer ID steckte.
+- Dafür ist das Prüfskript Version 12 nötig: auf router und pve „Skript aktualisieren“.
+
 ## 0.6.5 – 2026-11-16
 - „PBS herunterfahren“ wird abgelehnt, solange auf einem Host ein Backup läuft, auch eines, das das Tool nicht selbst gestartet hat.
 - Kann das Tool das bei einem Host nicht prüfen (älteres Prüfskript), fragt es vor dem Herunterfahren noch einmal nach.
