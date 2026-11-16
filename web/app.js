@@ -18,7 +18,7 @@ async function api(method, path, body) {
   const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'disktool' }, body: body ? JSON.stringify(body) : undefined });
   let json = {}; try { json = await r.json(); } catch { /* leer */ }
   if (r.status === 401 && path !== '/api/auth/login') { authState.loggedIn = false; render(); throw new Error('Bitte anmelden'); }
-  if (!r.ok) throw new Error(json.error ?? `Fehler ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(json.error ?? `Fehler ${r.status}`), { code: json.code ?? null, status: r.status });
   return json;
 }
 

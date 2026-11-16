@@ -121,7 +121,9 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
         else if (b.action === 'start') await engine.orch.startNow(b.pick);
         else if (b.action === 'abort') engine.orch.abort();
         else if (b.action === 'wake') await engine.orch.wake();
-        else if (b.action === 'poweroff') await engine.orch.powerOff();
+        else if (b.action === 'poweroff') {
+          try { await engine.orch.powerOff({ force: !!b.force }); } catch (e) { if (e.code === 'unsicher') return send(res, 409, { error: e.message, code: 'unsicher' }); throw e; }
+        }
         else throw new Error('Unbekannte Aktion');
       } catch (e) { return send(res, 400, { error: e.message }); }
       return send(res, 200, { ok: true });

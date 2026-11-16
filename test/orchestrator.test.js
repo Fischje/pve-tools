@@ -318,3 +318,16 @@ test('Altes Prüfskript: klarer Fehler statt „unerlaubte Zeichen“ oder „ke
   assert.deepEqual(calls('pve'), []);
   assert.equal(world.state.get('pbs').up, true);
 });
+
+test('PBS herunterfahren: abgelehnt, solange auf einem Host ein Backup läuft (auch ohne Lauf des Tools); bei altem Prüfskript nur mit Bestätigung', async () => {
+  const { o, engine, calls, world, advance } = await setup();
+  await engine.client('pve').backupStart('pbs', { select: 'all', ids: [] }); // Backup, das nicht das Tool steuert
+  await assert.rejects(() => o.powerOff(), /Auf pve läuft gerade ein Backup/);
+  assert.deepEqual(calls('pbs'), []);
+  await advance(31); // Backup ist fertig
+  const hs = engine.db.getHostState('router'); engine.db.setHostState('router', { ...hs, gateVersion: 9 });
+  await assert.rejects(() => o.powerOff(), (e) => e.code === 'unsicher' && /router/.test(e.message));
+  await o.powerOff({ force: true });
+  assert.deepEqual(calls('pbs'), ['poweroff']);
+  assert.equal(world.state.get('pbs').up, false);
+});

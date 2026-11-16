@@ -3,6 +3,10 @@
 Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
 Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
 
+## 0.6.5 – 2026-11-16
+- „PBS herunterfahren“ wird abgelehnt, solange auf einem Host ein Backup läuft, auch eines, das das Tool nicht selbst gestartet hat.
+- Kann das Tool das bei einem Host nicht prüfen (älteres Prüfskript), fragt es vor dem Herunterfahren noch einmal nach.
+
 ## 0.6.4 – 2026-11-16
 - Backup-Lauf: Das Tool sieht jetzt auch das gerade laufende Backup auf einem Host. Bisher erschien es erst nach dem Ende, und das Tool meldete nach 10 Minuten „keine Backup-Aufgabe“.
 - Dafür ist das Prüfskript Version 11 nötig: auf router und pve „Skript aktualisieren“. Der Trockenlauf warnt, solange ein Host noch eine ältere Version hat.

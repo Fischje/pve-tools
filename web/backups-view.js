@@ -243,7 +243,13 @@ function pbsPower(c) {
       : (c.wol?.mac ? `Einschalten schickt ein Magic Packet an ${c.wol.mac}. Fährt er an einem Backup-Tag hoch, sichert das Tool danach automatisch.` : 'Zum Einschalten fehlt noch die MAC-Adresse. Sie wird gelernt, sobald der PBS einmal läuft, oder du trägst sie unten ein.')),
     h('div', { class: 'actions' },
       on ? h('button', { disabled: running || !c.pbs.rightShutdown, title: !c.pbs.rightShutdown ? 'Recht „Herunterfahren“ fehlt auf dem PBS' : running ? 'Erst den Backup-Lauf abwarten' : '',
-        onclick: () => { if (confirm(`${c.pbs.label} jetzt herunterfahren? Laufende Wiederherstellungen oder Prüfungen auf dem PBS werden dabei abgebrochen.`)) act({ action: 'poweroff' }, 'Der PBS fährt in 20 Sekunden herunter.'); } }, 'PBS herunterfahren')
+        onclick: () => {
+          if (!confirm(`${c.pbs.label} jetzt herunterfahren? Laufende Wiederherstellungen oder Prüfungen auf dem PBS werden dabei abgebrochen.`)) return;
+          ctx.act(async () => {
+            try { await ctx.api('POST', '/api/backups/control', { action: 'poweroff' }); }
+            catch (e) { if (e.code !== 'unsicher' || !confirm(e.message)) throw e; await ctx.api('POST', '/api/backups/control', { action: 'poweroff', force: true }); }
+          }, 'Der PBS fährt in 20 Sekunden herunter.');
+        } }, 'PBS herunterfahren')
         : h('button', { class: 'primary', disabled: !c.wol?.mac, onclick: () => act({ action: 'wake' }, 'Magic Packet gesendet. Der PBS sollte in 1–2 Minuten erreichbar sein.') }, 'PBS einschalten')));
 }
 function wolHint(c) {

@@ -338,12 +338,28 @@ export class Orchestrator {
     return r;
   }
   /** PBS von Hand herunterfahren. Nicht, solange das Tool gerade ein Backup steuert. */
-  async powerOff() {
+  /**
+   * PBS von Hand herunterfahren. Abgelehnt, solange das Tool einen Lauf steuert oder auf einem Host ein Backup läuft
+   * (auch eines, das das Tool nicht selbst gestartet hat). Kann ein Host das nicht beantworten (aus, altes Prüfskript),
+   * kommt eine Rückfrage (force).
+   */
+  async powerOff({ force = false } = {}) {
     const s = this.settings();
     if (!s.pbsHostId) throw new Error('Kein PBS-Host festgelegt.');
     if (this.job()?.phase === 'läuft') throw new Error('Es läuft gerade ein Backup-Lauf. Erst abwarten oder „Im Tool abbrechen“.');
     if (!this.db.getHostState(s.pbsHostId)?.reachable) throw new Error('Der PBS ist nicht erreichbar (schon aus?).');
     if (!this.engine.hostRights(s.pbsHostId).includes('herunterfahren')) throw new Error('Auf dem PBS ist das Recht „Herunterfahren“ nicht freigegeben (Reiter Hosts einrichten, Skript aktualisieren).');
+    const now = this.now().getTime(), unknown = [];
+    for (const id of this.order(s)) {
+      const hs = this.db.getHostState(id), label = this.engine.hosts.find((h) => h.id === id)?.label ?? id;
+      if (!hs?.reachable) continue; // ein ausgeschalteter Host sichert nichts
+      if ((hs.gateVersion ?? 0) < 11) { unknown.push(label); continue; }
+      let tasks;
+      try { tasks = await this.engine.client(id).backupTasks(); } catch { unknown.push(label); continue; }
+      const run = tasks.find((t) => t.start && !t.end && now - t.start < 36 * 3600e3);
+      if (run) throw new Error(`Auf ${label} läuft gerade ein Backup (seit ${new Date(run.start).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}). Den PBS erst danach herunterfahren, sonst bricht es ab.`);
+    }
+    if (unknown.length && !force) throw Object.assign(new Error(`Ob auf ${unknown.join(', ')} gerade ein Backup läuft, kann das Tool nicht prüfen (Prüfskript zu alt oder keine Antwort). Trotzdem herunterfahren?`), { code: 'unsicher' });
     await this.engine.client(s.pbsHostId).poweroff();
     this.engine.event(s.pbsHostId, null, 'PBS wird von Hand heruntergefahren (in 20 Sekunden)');
   }
