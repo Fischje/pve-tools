@@ -307,7 +307,7 @@ export function powerOverview(engine) {
     const all = db.powerSince(m.id, now - 31 * 864e5);
     const day = all.filter((x) => x.ts >= now - 864e5);
     const week = avgWatts(all, now - 7 * 864e5, now);
-    return { ...m, passwordSet: !!db.getSetting(`power_pw:${m.id}`), latest: lat ? { ...lat, ts: iso(lat.ts), errorAt: iso(lat.errorAt) } : null,
+    return { ...m, passwordSet: !!db.getSetting(`power_pw:${m.id}`), latest: lat ? { ...lat, ts: iso(lat.ts), errorAt: iso(lat.errorAt) } : null, // gitleaks:allow (Feldname, kein Wert)
       series: day.map((x) => ({ ts: x.ts, watts: x.watts })), daily: dailyKwh(all).slice(-30), avg7d: week };
   });
   const changes = [];

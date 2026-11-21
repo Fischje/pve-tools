@@ -1,0 +1,5 @@
+# Fehlalarme von gitleaks (Feldnamen wie password:/passwordSet:, keine echten Werte) in schon gepushten Commits.
+30f915149fe79f159c4215d3ee586fb315724a62:src/service.js:palast-passwort-zuweisung:310
+30f915149fe79f159c4215d3ee586fb315724a62:src/power.js:palast-passwort-zuweisung:62
+30f915149fe79f159c4215d3ee586fb315724a62:web/energy-view.js:palast-passwort-zuweisung:120
+30f915149fe79f159c4215d3ee586fb315724a62:web/energy-view.js:palast-passwort-zuweisung:125

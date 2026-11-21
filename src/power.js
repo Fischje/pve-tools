@@ -59,7 +59,7 @@ export class PowerMeters {
       const now = this.engine.now().getTime();
       await Promise.all(this.meters().map(async (m) => {
         try {
-          const r = await this.read(m.address, { password: this.db.getSetting(`power_pw:${m.id}`) ?? '' });
+          const r = await this.read(m.address, { password: this.db.getSetting(`power_pw:${m.id}`) ?? '' }); // gitleaks:allow (Feldname, kein Wert)
           this.latest.set(m.id, { ...r, ts: now, error: null });
           (this.buf.get(m.id) ?? this.buf.set(m.id, []).get(m.id)).push({ power: r.power, total: r.total });
         } catch (e) { const prev = this.latest.get(m.id); this.latest.set(m.id, { ...(prev ?? {}), ts: prev?.ts ?? null, error: e.message, errorAt: now }); }

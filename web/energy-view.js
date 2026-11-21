@@ -117,12 +117,12 @@ function powerSetup(pw, data) {
       pw: h('input', { type: 'password', autocomplete: 'new-password', placeholder: m.passwordSet ? 'gespeichert' : 'ohne', size: 10 }), clear: false };
     const tr = h('tr', {}, h('td', {}, f.id), h('td', {}, f.label), h('td', {}, f.address), h('td', {}, f.host), h('td', {}, f.pw),
       h('td', {}, h('div', { class: 'row' },
-        h('button', { type: 'button', onclick: async () => { out.replaceChildren(h('p', { class: 'sub' }, 'Lese …')); try { const r = (await ctx.api('POST', '/api/power', { action: 'test', address: f.address.value.trim(), password: f.pw.value, id: f.id.value.trim() })).reading; out.replaceChildren(h('div', { class: 'finding ok' }, `${f.address.value}: ${watt(r.power)} jetzt, heute ${kwh(r.today)}, Zähler ${kwh(r.total)}${r.voltage ? `, ${r.voltage} V` : ''}`)); } catch (e) { out.replaceChildren(h('div', { class: 'finding critical' }, `${f.address.value}: ${e.message}`)); } } }, 'Testen'),
+        h('button', { type: 'button', onclick: async () => { out.replaceChildren(h('p', { class: 'sub' }, 'Lese …')); try { const r = (await ctx.api('POST', '/api/power', { action: 'test', address: f.address.value.trim(), password: f.pw.value, id: f.id.value.trim() })).reading; out.replaceChildren(h('div', { class: 'finding ok' }, `${f.address.value}: ${watt(r.power)} jetzt, heute ${kwh(r.today)}, Zähler ${kwh(r.total)}${r.voltage ? `, ${r.voltage} V` : ''}`)); } catch (e) { out.replaceChildren(h('div', { class: 'finding critical' }, `${f.address.value}: ${e.message}`)); } } }, 'Testen'), // gitleaks:allow (Feldname, kein Wert)
         h('button', { type: 'button', onclick: () => { rows.splice(rows.indexOf(f), 1); tr.remove(); } }, 'Entfernen'))));
     rows.push(f); tbody.append(tr);
   };
   for (const m of pw?.meters ?? []) addRow(m);
-  const save = () => ctx.act(() => ctx.api('POST', '/api/power', { action: 'save', price: price.value, meters: rows.map((f) => ({ id: f.id.value.trim(), label: f.label.value.trim(), address: f.address.value.trim(), hostId: f.host.value || null, password: f.pw.value || undefined })) }), 'Steckdosen gespeichert.');
+  const save = () => ctx.act(() => ctx.api('POST', '/api/power', { action: 'save', price: price.value, meters: rows.map((f) => ({ id: f.id.value.trim(), label: f.label.value.trim(), address: f.address.value.trim(), hostId: f.host.value || null, password: f.pw.value || undefined })) }), 'Steckdosen gespeichert.'); // gitleaks:allow (Feldname, kein Wert)
   return h('div', {},
     h('p', { class: 'sub' }, 'Je Server die IP-Adresse seiner Tasmota-Steckdose. Das Tool fragt jede Minute „Status 8“ ab (Leistung und Zähler). Ist in Tasmota ein Web-Passwort gesetzt, hier eintragen (Benutzer „admin“); es wird gespeichert, aber nie wieder angezeigt.'),
     h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Kennung', 'Name', 'Adresse', 'gehört zu', 'Passwort', ''].map((x) => h('th', {}, x)))), tbody)),
