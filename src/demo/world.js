@@ -1,4 +1,5 @@
 // Simulierte Hosts für den Demo-Modus und die Tests: antwortet wie das Gate-Skript, mit Beispieldaten und simulierten Tests.
+import { demoEnergyText } from './energy.js';
 import * as fx from './fixtures.js';
 import { EXPECTED_GATE_VERSION } from '../gate-version.js';
 import { demoGuests, demoSnapshots, demoBackups, demoAutosnapText } from './backups.js';
@@ -84,7 +85,7 @@ export class DemoWorld {
     this.state = new Map(def.hosts.map((h) => [h.id, { up: true, bootAt: clock().getTime() - h.uptime * 1000, disks: new Map(def.disks[h.id].map((j) => [j.device.name, { json: j, running: null }])), scrub: false }]));
   }
   /** Freigegebene Rechtegruppen je Host (Demo). */
-  rightsOf(id) { return this.rights?.get(id) ?? { pve: ['snapshots', 'backup-starten'], router: ['backup-starten'], pbs: ['herunterfahren'] }[id] ?? []; }
+  rightsOf(id) { return this.rights?.get(id) ?? { pve: ['snapshots', 'backup-starten'], router: ['backup-starten', 'energie'], pbs: ['herunterfahren'] }[id] ?? []; }
   /** Von der Demo „gestarteter“ vzdump-Task, solange er läuft oder gerade fertig wurde. */
   vzdumpTask(id) {
     const v = this.state.get(id).vz; if (!v) return null;
@@ -146,6 +147,16 @@ export class DemoTransport {
     switch (a[0]) {
       case 'version': return ok(String(this.id === 'pbs' ? (w.pbsGate ?? 3) : EXPECTED_GATE_VERSION)); // pbs ist in der Demo absichtlich veraltet
       case 'kernel': return ok('');
+      case 'energie': { const e = (st.energy ??= { installed: w.rightsOf(this.id).includes('energie'), boot: false, aspmOn: false, exclude: [] }); return ok(demoEnergyText(this.id, e)); }
+      case 'aspm-apply': case 'aspm-off': case 'aspm-boot': case 'aspm-exclude': {
+        if (!w.rightsOf(this.id).includes('energie')) return { code: 64, stdout: '', stderr: "gate: Recht 'energie' ist für diesen Host nicht freigegeben" };
+        const e = (st.energy ??= { installed: true, boot: false, aspmOn: false, exclude: [] });
+        (st.snapCalls ??= []).push(command);
+        if (a[0] === 'aspm-apply') { e.aspmOn = true; return ok('ASPM eingeschaltet (Demo)'); }
+        if (a[0] === 'aspm-boot') { e.boot = a[1] === 'on'; return ok(`boot=${e.boot ? 'enabled' : 'disabled'}`); }
+        if (a[0] === 'aspm-exclude') { e.exclude = a[1] === 'none' ? [] : a[1].split(','); return ok('ok'); }
+        return ok(`${a[1]}: ASPM ausgeschaltet`);
+      }
       case 'netinfo': return ok(this.id === 'pbs' ? 'dev=vmbr0\nphys=enp3s0\nmac=a8:a1:59:12:34:56\nwol=g\n' : '');
       case 'rechte': return ok(w.rightsOf(this.id).join('\n'));
       case 'storage-status': { if (this.id === 'pbs') return ok(''); return ok(`Name Type Status Total Used Available %\n${a[1]} pbs ${st.storageDown ? 'inactive' : 'active'} 17921372160 9012312320 8909059840 50.29%\n`); }

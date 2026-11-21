@@ -10,7 +10,7 @@ import { Engine } from './engine.js';
 import { Auth } from './auth.js';
 import { HostClient } from './hostapi.js';
 import { SshTransport } from './transport.js';
-import { overview, diskDetail, cleanSettings, statsOverview, testsList, backupOverview } from './service.js';
+import { overview, diskDetail, cleanSettings, statsOverview, testsList, backupOverview, energyOverview } from './service.js';
 import { isPrivateIp } from './net.js';
 import { Provisioner, writeHostsFile } from './provision.js';
 import { Notifier, cleanMail } from './notify.js';
@@ -128,6 +128,7 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       } catch (e) { return send(res, 400, { error: e.message }); }
       return send(res, 200, { ok: true });
     }
+    if (route === 'GET /api/energy') return send(res, 200, energyOverview(engine));
     if (route === 'GET /api/stats') return send(res, 200, statsOverview(engine));
     if (route === 'GET /api/tests') {
       const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit')) || 300));
@@ -137,6 +138,12 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
     if ((m = /^\/api\/disks\/([^/]+)$/.exec(url.pathname)) && req.method === 'GET') {
       const d = diskDetail(engine, decodeURIComponent(m[1]));
       return d ? send(res, 200, d) : send(res, 404, { error: 'Platte unbekannt' });
+    }
+    if ((m = /^\/api\/hosts\/([^/]+)\/energy$/.exec(url.pathname)) && req.method === 'POST') {
+      const hostId = decodeURIComponent(m[1]);
+      if (!engine.hosts.some((h) => h.id === hostId)) return send(res, 404, { error: 'Host unbekannt' });
+      const b = await readBody(req);
+      try { return send(res, 200, { ok: true, text: await engine.energyAction(hostId, b.action, b.arg) }); } catch (e) { return send(res, 400, { error: e.message }); }
     }
     if ((m = /^\/api\/hosts\/([^/]+)\/snapshots$/.exec(url.pathname)) && req.method === 'POST') {
       const hostId = decodeURIComponent(m[1]);

@@ -3,6 +3,7 @@ import { normalize } from './smart.js';
 import { parseZpoolStatus, parseZpoolList } from './zfs.js';
 import { parseKernelLog } from './kernel.js';
 import { parseNetinfo } from './wol.js';
+import { parseEnergy } from './energy.js';
 import { parseGuests, parseSnapshots, parseTasks, parseVzdumpLog, parseAutosnap } from './backups.js';
 
 export class HostClient {
@@ -90,6 +91,13 @@ export class HostClient {
     const r = await this.t.run(`backup-start ${storage} ${arg}`, 60000);
     if (r.code !== 0) throw new Error(r.stderr.trim() || r.stdout.trim().slice(0, 300) || 'Backup konnte nicht gestartet werden');
   }
+  // ---- Stromsparen (Prüfskript ab Version 13)
+  async energy() { const r = await this.t.run('energie', 60000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Bestandsaufnahme nicht lesbar'); return parseEnergy(r.stdout); }
+  async aspmApply() { const r = await this.t.run('aspm-apply', 120000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'ASPM nicht eingeschaltet'); return r.stdout.trim(); }
+  async aspmOff(addr) { const r = await this.t.run(`aspm-off ${addr}`, 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'ASPM nicht ausgeschaltet'); return r.stdout.trim(); }
+  async aspmBoot(on) { const r = await this.t.run(`aspm-boot ${on ? 'on' : 'off'}`, 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Dienst nicht geändert'); return r.stdout.trim(); }
+  async aspmExclude(addrs) { const r = await this.t.run(`aspm-exclude ${addrs.length ? addrs.join(',') : 'none'}`, 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Ausnahmen nicht gespeichert'); }
+
   /** Netzwerkkarte für Wake-on-LAN (Prüfskript ab Version 9). */
   async netinfo() { const r = await this.t.run('netinfo', 15000); return r.code === 0 ? parseNetinfo(r.stdout) : {}; }
   async poweroff() { const r = await this.t.run('poweroff', 30000); if (r.code !== 0) throw new Error(r.stderr.trim() || 'Herunterfahren abgelehnt'); }

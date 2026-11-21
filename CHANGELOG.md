@@ -3,6 +3,11 @@
 Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
 Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
 
+## 0.6.7 – 2026-11-21
+- Neuer Reiter „Energie“: je Host Mainboard, BIOS, CPU-Regelung, wie viel Zeit die CPU in sparsamen Zuständen (C-States) verbringt, ASPM je PCIe-Gerät und SATA-Stromsparen, dazu Hinweise und eine BIOS-Checkliste.
+- ASPM einschalten nach dem Vorbild von AutoASPM (pvetools-aspm): für alle geeigneten Geräte, mit Ausnahmeliste, Ausschalten je Gerät und auf Wunsch bei jedem Start.
+- Dafür Prüfskript Version 13 und das neue Recht „Energie-Einstellungen erlauben“ (Hosts einrichten, Skript aktualisieren).
+
 ## 0.6.6 – 2026-11-16
 - Jedes Backup bekommt den Namen des Gastes als Notiz. Im PBS steht er in der Spalte „Comment“, so weiß man später, was hinter einer ID steckte.
 - Dafür ist das Prüfskript Version 12 nötig: auf router und pve „Skript aktualisieren“.

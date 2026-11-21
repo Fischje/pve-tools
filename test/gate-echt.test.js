@@ -27,10 +27,17 @@ fake('hostname', 'echo pve');
 fake('ip', 'echo "default via 192.168.1.1 dev vmbr0 proto kernel"');
 fake('ethtool', 'printf "Settings for $1:\\n\\tWake-on: g\\n"');
 writeFileSync(P('autosnap-run'), `#!/usr/bin/env bash\necho "autosnap-run $* FORCE=\${FORCE:-}" >> "${P('aufrufe.log')}"\n`); chmodSync(P('autosnap-run'), 0o755);
-writeFileSync(P('rechte'), 'snapshots\nbackup-starten\nherunterfahren\n');
+writeFileSync(P('rechte'), 'snapshots\nbackup-starten\nherunterfahren\nenergie\n');
+fake('dmidecode', 'case "$2" in baseboard-product-name) echo "B760M DS3H";; bios-version) echo F12;; *) echo X;; esac');
+fake('lspci', 'printf "0000:03:00.0 SATA controller: ASMedia ASM1166\\n\\t\\tLnkCap:\\tPort #0, ASPM L0s L1, Exit Latency L1 <64us\\n\\t\\tLnkCtl:\\tASPM Disabled; RCB 64 bytes\\n"');
+fake('setpci', `echo "setpci $*" >> "${P('aufrufe.log')}"`);
+fake('systemctl', `echo "systemctl $*" >> "${P('aufrufe.log')}"; [[ "$1" == is-enabled ]] && echo enabled; exit 0`);
+fake('logger', 'exit 0');
+writeFileSync(P('pvetools-aspm'), readFileSync('host-setup/pvetools-aspm', 'utf8').replaceAll('/etc/pvetools-aspm.conf', P('aspm.conf'))); chmodSync(P('pvetools-aspm'), 0o755);
+writeFileSync(P('aspm.service'), '[Unit]\n');
 const gate = readFileSync('host-setup/gate.sh', 'utf8')
   .replaceAll('/etc/diskmon/rechte', P('rechte')).replaceAll('/usr/local/sbin/autosnap-run', P('autosnap-run'))
-  .replaceAll('/run/diskmon-snap.lock', P('lock')).replaceAll('/etc/autosnap.conf', P('conf')).replaceAll('/etc/autosnap.disabled', P('disabled'));
+  .replaceAll('/run/diskmon-snap.lock', P('lock')).replaceAll('/usr/local/sbin/pvetools-aspm', P('pvetools-aspm')).replaceAll('/etc/pvetools-aspm.conf', P('aspm.conf')).replaceAll('/etc/systemd/system/pvetools-aspm.service', P('aspm.service')).replaceAll('/etc/autosnap.conf', P('conf')).replaceAll('/etc/autosnap.disabled', P('disabled'));
 writeFileSync(P('gate.sh'), gate);
 
 /** Transport wie SshTransport, aber lokal: der Befehl landet in SSH_ORIGINAL_COMMAND des Prüfskripts. */
@@ -49,7 +56,7 @@ test('Backup starten über das echte Prüfskript: alle, Ausschlussliste mit Komm
 });
 
 test('Weitere Befehle des Tools über das echte Prüfskript', async () => {
-  assert.deepEqual(await client.rights(), ['snapshots', 'backup-starten', 'herunterfahren']);
+  assert.deepEqual(await client.rights(), ['snapshots', 'backup-starten', 'herunterfahren', 'energie']);
   assert.equal((await client.storageActive('pbs')).active, true);
   assert.equal((await client.snapRun('monthly', { force: true })).ok, true);
   assert.ok(log().some((x) => x === 'autosnap-run monthly FORCE=1'));
@@ -67,4 +74,23 @@ test('Aufgabenliste über das echte Prüfskript enthält auch das laufende Backu
   const running = tasks.filter((t) => t.start && !t.end);
   assert.equal(running.length, 1, 'laufende Aufgabe fehlt: --source all im Prüfskript?');
   assert.equal(tasks.length, 2);
+});
+
+test('Energie über das echte Prüfskript: Bestandsaufnahme, ASPM einschalten, Ausnahmen, Start-Dienst', async () => {
+  const e = await client.energy();
+  assert.equal(e.system['baseboard-product-name'], 'B760M DS3H');
+  assert.equal(e.aspm.installed, true); assert.equal(e.aspm.boot, 'enabled');
+  assert.deepEqual(e.pci.map((p) => [p.addr, p.cap, p.ctl]), [['0000:03:00.0', 'L0sL1', 'none']]);
+  await client.aspmExclude(['0000:03:00.0']);
+  assert.equal(readFileSync(P('aspm.conf'), 'utf8'), 'EXCLUDE=0000:03:00.0\n');
+  assert.deepEqual((await client.energy()).aspm.exclude, ['0000:03:00.0']);
+  assert.match(await client.aspmApply(), /ausgenommen/);
+  await client.aspmExclude([]);
+  assert.match(await client.aspmApply(), /0000:03:00.0: ASPM L0sL1 eingeschaltet/);
+  assert.ok(log().includes('setpci -s 0000:03:00.0 CAP_EXP+10.b=03:03'));
+  await client.aspmOff('0000:03:00.0');
+  await client.aspmBoot(true);
+  assert.ok(log().includes('systemctl enable pvetools-aspm.service'));
+  await assert.rejects(() => client.aspmExclude(['0000:03:00.0;id']), /unerlaubte Zeichen|ungültige Adresse/);
+  await assert.rejects(() => client.aspmOff('kaputt'), /aspm-off/);
 });

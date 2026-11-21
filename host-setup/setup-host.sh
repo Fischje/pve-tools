@@ -83,6 +83,28 @@ if [[ ",${DISKMON_RECHTE:-}," == *,snapshots,* && -f "$HIER/autosnap-run" ]]; th
   fi
 fi
 
+# Mit dem Recht "energie": Hilfsskript pvetools-aspm und ein Dienst, der es bei jedem Start ausführen kann.
+# Der Dienst wird nur angelegt, nicht eingeschaltet: Das macht das Tool, wenn du es dort einschaltest.
+if [[ ",${DISKMON_RECHTE:-}," == *,energie,* && -f "$HIER/pvetools-aspm" ]]; then
+  install -m 0755 -o root -g root "$HIER/pvetools-aspm" /usr/local/sbin/pvetools-aspm
+  if [[ ! -f /etc/systemd/system/pvetools-aspm.service ]]; then
+    cat > /etc/systemd/system/pvetools-aspm.service <<'UNIT'
+[Unit]
+Description=PVE-Tools: ASPM für PCIe-Geräte einschalten (Stromsparen)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pvetools-aspm apply
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    systemctl daemon-reload 2>/dev/null || true
+  fi
+  echo "pvetools-aspm installiert (Start beim Booten: im Tool einschalten)."
+fi
+
 tmp="$(mktemp)"
 cat > "$tmp" <<SUDO
 # PVE-Tools: Benutzer $BENUTZER darf nur das Prüfskript als root ausführen.

@@ -38,13 +38,13 @@ async function defaultResolve(address) {
 export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 /** Das Skript, das auf dem Host über `bash -s` läuft. gate.sh und setup-host.sh werden darin als Dateien abgelegt. */
-export const RIGHTS = ['snapshots', 'backup-starten', 'herunterfahren'];
+export const RIGHTS = ['snapshots', 'backup-starten', 'herunterfahren', 'energie'];
 /** rights: null = Rechtedatei auf dem Host unverändert lassen, sonst Liste der freizugebenden Gruppen (leer = alle entziehen). */
-export function buildRemoteScript({ gate, setup, wrapper = null, publicKey, action, bindIp, installPackages, rights = null }) {
+export function buildRemoteScript({ gate, setup, wrapper = null, aspm = null, publicKey, action, bindIp, installPackages, rights = null }) {
   if (rights != null && !(Array.isArray(rights) && rights.every((r) => RIGHTS.includes(r)))) throw new Error('Unbekannte Rechtegruppe');
   if (!KEY_RE.test(publicKey)) throw new Error('Ungültiger öffentlicher Schlüssel');
-  let d1, d2, d3;
-  do { d1 = `DISKTOOL_${randomBytes(8).toString('hex')}_A`; d2 = `DISKTOOL_${randomBytes(8).toString('hex')}_B`; d3 = `DISKTOOL_${randomBytes(8).toString('hex')}_C`; } while (gate.includes(d1) || setup.includes(d2) || (wrapper ?? '').includes(d3));
+  let d1, d2, d3, d4;
+  do { d1 = `DISKTOOL_${randomBytes(8).toString('hex')}_A`; d2 = `DISKTOOL_${randomBytes(8).toString('hex')}_B`; d3 = `DISKTOOL_${randomBytes(8).toString('hex')}_C`; d4 = `DISKTOOL_${randomBytes(8).toString('hex')}_D`; } while (gate.includes(d1) || setup.includes(d2) || (wrapper ?? '').includes(d3) || (aspm ?? '').includes(d4));
   const run = action === 'remove'
     ? 'bash "$T/setup-host.sh" --entfernen'
     : `SRC=""
@@ -62,7 +62,9 @@ ${setup}
 ${d2}
 ${wrapper != null ? `cat > "$T/autosnap-run" <<'${d3}'
 ${wrapper}
-${d3}\n` : ''}chmod 0755 "$T/gate.sh" "$T/setup-host.sh"${wrapper != null ? ' "$T/autosnap-run"' : ''}
+${d3}\n` : ''}${aspm != null ? `cat > "$T/pvetools-aspm" <<'${d4}'
+${aspm}
+${d4}\n` : ''}chmod 0755 "$T/gate.sh" "$T/setup-host.sh"${wrapper != null ? ' "$T/autosnap-run"' : ''}${aspm != null ? ' "$T/pvetools-aspm"' : ''}
 ${run}
 `;
 }
@@ -165,8 +167,9 @@ export class Provisioner {
     const setup = await readFile(path.join(this.repoDir, 'host-setup', 'setup-host.sh'), 'utf8');
     const rights = Array.isArray(req.rights) ? req.rights.filter((r) => RIGHTS.includes(r)) : null;
     const wrapper = rights?.includes('snapshots') ? await readFile(path.join(this.repoDir, 'host-setup', 'autosnap-run'), 'utf8') : null;
+    const aspm = rights?.includes('energie') ? await readFile(path.join(this.repoDir, 'host-setup', 'pvetools-aspm'), 'utf8') : null;
     const bindIp = action === 'update' ? existing.bindIp !== false : req.bindIp !== false;
-    const script = buildRemoteScript({ gate, setup, publicKey, action: action === 'remove' ? 'remove' : 'install', bindIp, installPackages: !!req.installPackages, rights, wrapper });
+    const script = buildRemoteScript({ gate, setup, publicKey, action: action === 'remove' ? 'remove' : 'install', bindIp, installPackages: !!req.installPackages, rights, wrapper, aspm });
 
     const dir = await mkdtemp(path.join(this.tmp, 'pvetools-'));
     let res;

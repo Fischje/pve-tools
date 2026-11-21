@@ -87,6 +87,13 @@ export class Engine {
     if ((gateVersion ?? 1) >= 6) {
       try { this.db.setSetting(`rights:${hostId}`, JSON.stringify(await client.rights())); } catch (e) { this.log(`[${hostId}] Rechte: ${e.message}`); }
     }
+    if ((gateVersion ?? 1) >= 13) {
+      // Bestandsaufnahme Stromsparen: höchstens stündlich (C-States ändern sich langsam), auf Knopfdruck sofort
+      const last = Number(this.db.getSetting(`energy_poll:${hostId}`) ?? 0);
+      if (force || now.getTime() - last >= 55 * MIN) {
+        try { this.db.setSetting(`energy:${hostId}`, JSON.stringify({ ...(await client.energy()), ts: now.getTime() })); this.db.setSetting(`energy_poll:${hostId}`, String(now.getTime())); } catch (e) { this.log(`[${hostId}] Energie: ${e.message}`); }
+      }
+    }
     if ((gateVersion ?? 1) >= 5) {
       try { this.db.setSetting(`kernel:${hostId}`, JSON.stringify(await client.kernelLog())); } catch (e) { this.log(`[${hostId}] Kernel-Meldungen: ${e.message}`); }
     }
@@ -270,6 +277,23 @@ export class Engine {
     await this.pollBackups(hostId, this.client(hostId), this.now(), true).catch(() => {});
   }
   async snapDryRun(hostId, label) { this.snapGuard(hostId); return this.client(hostId).snapDryRun(label); }
+  /** Stromsparen: Aktionen über das Prüfskript (Recht „energie“). Danach wird die Bestandsaufnahme neu gelesen. */
+  async energyAction(hostId, action, arg) {
+    if (!this.hostRights(hostId).includes('energie')) throw new Error('Für diesen Host ist das Recht „Energie“ nicht freigegeben. Im Reiter „Hosts einrichten“ bei „Skript aktualisieren“ freigeben.');
+    const c = this.client(hostId);
+    let out = '';
+    if (action === 'apply') out = await c.aspmApply();
+    else if (action === 'off') { if (!/^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$/.test(String(arg))) throw new Error('Ungültige Geräteadresse'); out = await c.aspmOff(arg); }
+    else if (action === 'boot') out = await c.aspmBoot(!!arg);
+    else if (action === 'exclude') {
+      if (!Array.isArray(arg) || arg.length > 64 || arg.some((x) => !/^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$/.test(String(x)))) throw new Error('Ungültige Ausnahmeliste');
+      await c.aspmExclude(arg);
+    } else throw new Error('Unbekannte Aktion');
+    const text = { apply: 'ASPM eingeschaltet', off: `ASPM für ${arg} ausgeschaltet`, boot: arg ? 'ASPM wird bei jedem Start eingeschaltet' : 'ASPM wird beim Start nicht mehr eingeschaltet', exclude: `ASPM-Ausnahmen gespeichert (${arg?.length ?? 0})` }[action];
+    this.event(hostId, null, `Energie: ${text}`);
+    try { this.db.setSetting(`energy:${hostId}`, JSON.stringify({ ...(await c.energy()), ts: this.now().getTime() })); } catch (e) { this.log(`[${hostId}] Energie: ${e.message}`); }
+    return out;
+  }
   async setSnapSwitch(hostId, on) { this.snapGuard(hostId); await this.client(hostId).snapSwitch(on); this.event(hostId, null, `Snapshots ${on ? 'eingeschaltet' : 'ausgeschaltet'}`); this.pollBackups(hostId, this.client(hostId), this.now(), true).catch(() => {}); }
 
   async startNow(hostId, serial, plan, origin) {

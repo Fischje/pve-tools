@@ -8,11 +8,12 @@ import { globalStats, hostStatsSection } from './stats-view.js';
 import { runningPanel, hostTestsPanel, allTestsPanel, setTestFilters } from './tests-view.js';
 import { hostPage, hostViewGo } from './host-view.js';
 import { backupsView } from './backups-view.js';
+import { energyView } from './energy-view.js';
 
 const BRAND = "Fischje's PVE-Tools";
 document.title = BRAND;
 const root = document.getElementById('app');
-let data = null, stats = null, tests = null, backups = null, view = 'uebersicht', authState = { passwordSet: false, loggedIn: true }, timer = null, dialogOpen = false, flash = {};
+let data = null, stats = null, tests = null, backups = null, energy = null, view = 'uebersicht', authState = { passwordSet: false, loggedIn: true }, timer = null, dialogOpen = false, flash = {};
 
 async function api(method, path, body) {
   const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'disktool' }, body: body ? JSON.stringify(body) : undefined });
@@ -270,6 +271,7 @@ const RIGHT_DEFS = [
   ['snapshots', 'Snapshots auslösen erlauben', 'nur Proxmox-Hosts wie router und pve: das Tool darf das autosnap-Skript starten, den Snapshot-Schalter setzen, den Cron von proxmox-autosnap aus- und einschalten und installiert den verwalteten Wrapper autosnap-run.'],
   ['backup-starten', 'Backups starten erlauben', 'nur Proxmox-Hosts (router, pve): das Tool darf vzdump mit festen Parametern als eigenen Dienst starten.'],
   ['herunterfahren', 'Herunterfahren erlauben', 'nur der PBS: das Tool darf den Host nach einem erfolgreichen Backup-Lauf herunterfahren.'],
+  ['energie', 'Energie-Einstellungen erlauben', 'alle Hosts: das Tool installiert pvetools-aspm und darf ASPM für PCIe-Geräte ein- und ausschalten (Stromsparen).'],
 ];
 /** Haken für die Rechtegruppen. @returns {{nodes:Node[], get:()=>string[]}} */
 function rightsPicker(current = []) {
@@ -468,14 +470,14 @@ function render() {
   if (dialogOpen) return;
   if (!authState.loggedIn) { root.replaceChildren(loginView()); return; }
   if (!data) { root.replaceChildren(h('p', { class: 'empty' }, 'Lade …')); return; }
-  const tabs = [['uebersicht', 'Übersicht'], ['host', 'Hosts im Detail'], ['backups', 'Backups & Snapshots'], ['tests', 'Tests'], ['zeitplan', 'Zeitplan & Konto'], ['hosts', 'Hosts einrichten'], ['hilfe', 'Hilfe']];
-  const body = { uebersicht: viewOverview, host: viewHostPage, backups: () => backupsView(backups, data), tests: viewTests, zeitplan: viewSettings, hosts: viewHosts, hilfe: viewHelp }[view]();
+  const tabs = [['uebersicht', 'Übersicht'], ['host', 'Hosts im Detail'], ['backups', 'Backups & Snapshots'], ['energie', 'Energie'], ['tests', 'Tests'], ['zeitplan', 'Zeitplan & Konto'], ['hosts', 'Hosts einrichten'], ['hilfe', 'Hilfe']];
+  const body = { uebersicht: viewOverview, host: viewHostPage, backups: () => backupsView(backups, data), energie: () => energyView(energy, data), tests: viewTests, zeitplan: viewSettings, hosts: viewHosts, hilfe: viewHelp }[view]();
   showFlash(flash); flash = {};
   pausedBar.hidden = !ui.dirty;
   const scrollY = window.scrollY;
   root.replaceChildren(...[
     h('header', { class: 'top' },
-      h('div', { class: 'brand' }, h('b', {}, BRAND), data.version ? h('button', { class: 'version', title: 'Was ist neu? Änderungen anzeigen', onclick: () => openChangelog() }, `v${data.version}`) : null, h('span', { class: 'sub' }, 'Platten, ZFS, Backups und Snapshots')),
+      h('div', { class: 'brand' }, h('b', {}, BRAND), data.version ? h('button', { class: 'version', title: 'Was ist neu? Änderungen anzeigen', onclick: () => openChangelog() }, `v${data.version}`) : null, h('span', { class: 'sub' }, 'Platten, ZFS, Backups, Energie')),
       h('div', { class: 'title-row' }, h('div', { class: 'summary' }, h('span', { class: `dot ${data.summary.level}`, 'aria-hidden': 'true' }), h('span', { role: 'status' }, data.summary.text)), h('span', { class: 'sub' }, `Stand ${fmtDT(data.now)}`)),
       h('nav', { class: 'tabs', 'aria-label': 'Bereiche' }, tabs.map(([id, t]) => h('button', { 'aria-current': view === id ? 'page' : null, onclick: () => { view = id; ui.dirty = false; render(); window.scrollTo(0, 0); } }, t))), pausedBar),
     !authState.passwordSet ? h('div', { class: 'banner warn' }, h('span', {}, 'Es ist noch kein Passwort gesetzt. Die Seite ist nur im lokalen Netz erreichbar, aber jeder dort kann Tests starten.'), h('button', { onclick: () => { ui.tabs.settings = 'konto'; view = 'zeitplan'; render(); } }, 'Passwort setzen')) : null,
@@ -489,7 +491,7 @@ async function load(redraw = true, auto = false) {
     const st = await fetch('/api/auth/status').then((r) => r.json());
     authState = st;
     if (!st.loggedIn) { render(); return; }
-    [data, stats, tests, backups] = await Promise.all([api('GET', '/api/overview'), api('GET', '/api/stats'), api('GET', '/api/tests?limit=400'), api('GET', '/api/backups').catch(() => null)]);
+    [data, stats, tests, backups, energy] = await Promise.all([api('GET', '/api/overview'), api('GET', '/api/stats'), api('GET', '/api/tests?limit=400'), api('GET', '/api/backups').catch(() => null), api('GET', '/api/energy').catch(() => null)]);
     if (redraw) render();
   } catch (e) { if (!data) root.replaceChildren(h('p', { class: 'empty error' }, `Keine Verbindung: ${e.message}`)); }
 }

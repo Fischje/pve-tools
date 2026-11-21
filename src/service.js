@@ -1,5 +1,6 @@
 // Bereitet die Daten für die Oberfläche auf (Bewertung, nächste Termine, Banner, Zusammenfassung).
 import { nextSlots, planOf } from './snapshots.js';
+import { rateEnergy, cstateShares } from './energy.js';
 import { rate, LEVEL_LABEL, LEVEL_ORDER } from './rating.js';
 import { testWindow, nextPlanned, blockedIntervals, dayAllowed, dayKey, DEFAULT_SETTINGS } from './schedule.js';
 import { ratePool } from './zfs.js';
@@ -277,5 +278,22 @@ export function backupOverview(engine) {
       problems: guestsAll.filter((g) => lv(g.level) >= lv('watch')).length, failedBackups: guestsAll.filter((g) => g.backup?.result === 'failed').length,
       runs30: allTasks.filter((x) => (t - Date.parse(x.start)) / DAY_MS <= 30).length,
     },
+  };
+}
+
+/** Bereich „Energie“: je Host die letzte Bestandsaufnahme mit Hinweisen. */
+export function energyOverview(engine) {
+  const now = engine.now();
+  return {
+    now: iso(now),
+    hosts: engine.hosts.map((host) => {
+      const hs = engine.db.getHostState(host.id);
+      let e = null; try { e = JSON.parse(engine.db.getSetting(`energy:${host.id}`) ?? 'null'); } catch { /* leer */ }
+      return {
+        id: host.id, label: host.label ?? host.id, reachable: !!hs?.reachable, gate: hs?.gateVersion ?? null, supported: (hs?.gateVersion ?? 0) >= 13,
+        right: engine.hostRights(host.id).includes('energie'),
+        data: e ? { ...e, ts: iso(e.ts), shares: cstateShares(e), findings: rateEnergy(e) } : null,
+      };
+    }),
   };
 }

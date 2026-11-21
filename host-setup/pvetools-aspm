@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# pvetools-aspm (wird von PVE-Tools verwaltet)
+#
+# Zweck:   ASPM (Stromsparen der PCIe-Verbindungen) für alle Geräte einschalten, die es unterstützen. Nach dem Vorbild von AutoASPM:
+#          Jedes Gerät bekommt genau die Stufe, die es selbst meldet (L1, L0s oder L0s+L1). Geräte in der Ausnahmeliste bleiben unverändert.
+# Aufruf:  pvetools-aspm status         zeigt je Gerät: Adresse, kann, ist eingeschaltet, Name
+#          pvetools-aspm apply          schaltet ASPM ein (wirkt bis zum nächsten Neustart)
+#          pvetools-aspm off <adresse>  schaltet ASPM für ein Gerät wieder aus (bis zum nächsten Neustart)
+# Wann:    Von Hand über das Tool oder bei jedem Start über pvetools-aspm.service (nur, wenn im Tool eingeschaltet).
+# Ausnahmen: /etc/pvetools-aspm.conf, je Zeile EXCLUDE=<adresse>, z. B. EXCLUDE=0000:03:00.0 (schreibt das Tool).
+set -euo pipefail
+
+CONF=/etc/pvetools-aspm.conf
+command -v lspci >/dev/null && command -v setpci >/dev/null || { echo "pciutils fehlt (lspci/setpci)" >&2; exit 1; }
+
+# Eine Zeile je PCIe-Gerät mit Link: Adresse <TAB> kann <TAB> ist <TAB> Name
+liste() {
+  lspci -D -vv 2>/dev/null | awk '
+    function stufe(s) { if (s ~ /not supported|Disabled/) return "none"; if (s ~ /L0s L1/) return "L0sL1"; if (s ~ /L1/) return "L1"; if (s ~ /L0s/) return "L0s"; return "none" }
+    /^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7] / { if (dev != "" && cap != "") print dev "\t" cap "\t" ctl "\t" name; dev = $1; name = substr($0, length($1) + 2); cap = ""; ctl = ""; next }
+    /LnkCap:/ { m = $0; sub(/.*ASPM /, "", m); sub(/,.*/, "", m); cap = stufe(m) }
+    /LnkCtl:/ { m = $0; sub(/.*ASPM /, "", m); sub(/;.*/, "", m); ctl = stufe(m) }
+    END { if (dev != "" && cap != "") print dev "\t" cap "\t" ctl "\t" name }'
+}
+ausgenommen() { [[ -r "$CONF" ]] && grep -qx "EXCLUDE=$1" "$CONF"; }
+wert() { case "$1" in L0s) echo 1 ;; L1) echo 2 ;; L0sL1) echo 3 ;; *) echo 0 ;; esac; }
+
+case "${1:-status}" in
+  status) liste ;;
+  apply)
+    n=0
+    while IFS=$'\t' read -r dev cap ctl name; do
+      [[ "$cap" == none ]] && continue
+      if ausgenommen "$dev"; then echo "$dev: ausgenommen ($name)"; continue; fi
+      if [[ "$ctl" == "$cap" ]]; then echo "$dev: schon $cap ($name)"; continue; fi
+      setpci -s "$dev" "CAP_EXP+10.b=0$(wert "$cap"):03"
+      echo "$dev: ASPM $cap eingeschaltet ($name)"; n=$((n + 1))
+    done < <(liste)
+    logger -t pvetools-aspm "ASPM für $n Geräte eingeschaltet" 2>/dev/null || true ;;
+  off)
+    [[ "${2:-}" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] || { echo "Adresse fehlt oder ungültig" >&2; exit 2; }
+    setpci -s "$2" "CAP_EXP+10.b=00:03"
+    echo "$2: ASPM ausgeschaltet" ;;
+  *) echo "Aufruf: $0 status|apply|off <adresse>" >&2; exit 2 ;;
+esac

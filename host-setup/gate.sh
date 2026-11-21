@@ -22,6 +22,7 @@
 #   tasklog <UPID>               Protokoll einer vzdump-Aufgabe (JSON)
 #   autosnap                     Zustand der Snapshot-Skripte (Schalter, Aufbewahrung, Cron, letzte Meldungen)
 #   rechte                       Welche Rechtegruppen für dieses Skript freigegeben sind (Datei /etc/diskmon/rechte)
+#   energie                      Bestandsaufnahme Stromsparen: System/BIOS, CPU-Regelung, C-States, ASPM je PCIe-Gerät, SATA (nur lesend)
 #   netinfo                      Netzwerkkarte für Wake-on-LAN: Name, MAC-Adresse, Wake-on-Zustand (nur lesend)
 #   kernel                       Kernel-Meldungen der letzten 48 h zu SATA/NVMe-Verbindungsfehlern (nur ausgewählte Zeilen)
 # Schreibende Befehle, nur wenn die Rechtegruppe "snapshots" bei der Einrichtung freigegeben wurde (mit dem root-Passwort):
@@ -36,11 +37,16 @@
 #   backup-start <speicher> exclude <ids>    dito, ohne die Gäste <ids> (Ziffern, Komma getrennt)
 #   backup-start <speicher> only <ids>       dito, nur diese Gäste
 #   poweroff                                 fährt den Host in 20 Sekunden herunter
+# Stromsparen (Recht "energie"):
+#   aspm-apply                               ASPM für alle geeigneten PCIe-Geräte einschalten (pvetools-aspm, bis zum Neustart)
+#   aspm-off <adresse>                       ASPM für ein Gerät ausschalten (bis zum Neustart)
+#   aspm-boot on|off                         pvetools-aspm.service bei jedem Start ausführen oder nicht
+#   aspm-exclude <adressen>|none             Ausnahmeliste schreiben (Komma getrennt, z. B. 0000:03:00.0)
 #   snap-cron on|off|status                  benennt /etc/cron.d/proxmox-autosnap um (aus) bzw. zurück (an), damit nie zwei Auslöser laufen
 set -euo pipefail
 
 # Version dieses Prüfskripts. Das Tool vergleicht sie mit der eigenen und zeigt veraltete Hosts an. Bei Änderungen hochzählen.
-GATE_VERSION=12
+GATE_VERSION=13
 
 fail() { echo "gate: $*" >&2; exit 64; }
 
@@ -130,6 +136,66 @@ case "${a[0]}" in
     echo "== cron"; cat /etc/cron.d/proxmox-autosnap 2>/dev/null || true
     echo "== conf"; cat /etc/autosnap.conf 2>/dev/null || true
     echo "== log"; journalctl -t autosnap -n 40 --no-pager -o short-iso 2>/dev/null || true ;;
+  energie)
+    [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
+    dmi() { dmidecode -s "$1" 2>/dev/null | head -n1 || true; }
+    echo "== system"
+    if command -v dmidecode >/dev/null 2>&1; then
+      for k in system-manufacturer system-product-name baseboard-manufacturer baseboard-product-name bios-vendor bios-version bios-release-date processor-version; do echo "$k=$(dmi "$k")"; done
+    fi
+    echo "cpus=$(nproc 2>/dev/null || echo 1)"
+    echo "uptime=$(cut -d' ' -f1 /proc/uptime)"
+    echo "== cpufreq"
+    c=/sys/devices/system/cpu/cpu0/cpufreq
+    for k in scaling_driver scaling_governor energy_performance_preference scaling_available_governors energy_performance_available_preferences; do echo "$k=$(cat "$c/$k" 2>/dev/null || true)"; done
+    echo "== cstates"
+    # Summe über alle CPUs je Zustand: Name, Anzahl, Zeit in Mikrosekunden
+    for st in /sys/devices/system/cpu/cpu0/cpuidle/state*; do
+      [[ -d "$st" ]] || continue
+      i="${st##*/}"; t=0; u=0
+      for f in /sys/devices/system/cpu/cpu*/cpuidle/"$i"; do t=$((t + $(cat "$f/time" 2>/dev/null || echo 0))); u=$((u + $(cat "$f/usage" 2>/dev/null || echo 0))); done
+      echo "$i $(cat "$st/name" 2>/dev/null || echo ?) $u $t"
+    done
+    echo "== aspm"
+    echo "policy=$(cat /sys/module/pcie_aspm/parameters/policy 2>/dev/null || true)"
+    if [[ -x /usr/local/sbin/pvetools-aspm ]]; then
+      echo "installed=yes"; echo "boot=$(systemctl is-enabled pvetools-aspm.service 2>/dev/null || true)"
+      sed -n 's/^EXCLUDE=\([0-9a-f:.]*\)$/exclude=\1/p' /etc/pvetools-aspm.conf 2>/dev/null || true
+    else echo "installed=no"; fi
+    echo "== pci"
+    if command -v lspci >/dev/null 2>&1; then
+      { lspci -D -vv 2>/dev/null || true; } | grep -E '^[0-9a-f]{4}:|LnkCap:|LnkCtl:' || true
+    fi
+    echo "== sata"
+    for h in /sys/class/scsi_host/host*; do [[ -r "$h/link_power_management_policy" ]] && echo "${h##*/} $(cat "$h/link_power_management_policy")"; done
+    true ;;
+  aspm-apply)
+    need energie
+    [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
+    [[ -x /usr/local/sbin/pvetools-aspm ]] || fail "pvetools-aspm fehlt (Skript aktualisieren mit Haken Energie)"
+    exec /usr/local/sbin/pvetools-aspm apply ;;
+  aspm-off)
+    need energie
+    [[ ${#a[@]} -eq 2 && "${a[1]}" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] || fail "Argumente: aspm-off <adresse>"
+    [[ -x /usr/local/sbin/pvetools-aspm ]] || fail "pvetools-aspm fehlt"
+    exec /usr/local/sbin/pvetools-aspm off "${a[1]}" ;;
+  aspm-boot)
+    need energie
+    [[ ${#a[@]} -eq 2 && "${a[1]}" =~ ^(on|off)$ ]] || fail "Argumente: aspm-boot on|off"
+    [[ -f /etc/systemd/system/pvetools-aspm.service ]] || fail "pvetools-aspm.service fehlt"
+    if [[ "${a[1]}" == on ]]; then systemctl enable pvetools-aspm.service >/dev/null 2>&1; else systemctl disable pvetools-aspm.service >/dev/null 2>&1; fi
+    echo "boot=$(systemctl is-enabled pvetools-aspm.service 2>/dev/null || true)" ;;
+  aspm-exclude)
+    need energie
+    [[ ${#a[@]} -eq 2 ]] || fail "Argumente: aspm-exclude <adressen>|none"
+    tmp="$(mktemp /etc/pvetools-aspm.conf.XXXXXX)"
+    if [[ "${a[1]}" != none ]]; then
+      IFS=, read -r -a ex <<< "${a[1]}"
+      (( ${#ex[@]} <= 64 )) || fail "zu viele Adressen"
+      for x in "${ex[@]}"; do [[ "$x" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] || { rm -f "$tmp"; fail "ungültige Adresse: $x"; }; echo "EXCLUDE=$x" >> "$tmp"; done
+    fi
+    chmod 0644 "$tmp"; mv "$tmp" /etc/pvetools-aspm.conf
+    echo "ok" ;;
   netinfo)
     [[ ${#a[@]} -eq 1 ]] || fail "zu viele Argumente"
     command -v ip >/dev/null 2>&1 || exit 0

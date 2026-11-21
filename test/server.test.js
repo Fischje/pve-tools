@@ -400,3 +400,23 @@ test('Version und Änderungen: in der Übersicht und unter /api/changelog (letzt
   assert.equal(all.entries.length, all.total);
   await close();
 });
+
+test('Energie per API: Übersicht je Host, ASPM-Aktionen nur mit Recht, Eingaben werden geprüft', async () => {
+  const { call, close, engine } = await boot();
+  await engine.pollHost('router', { force: true }); await engine.pollHost('pve', { force: true });
+  const en = (await call('GET', '/api/energy')).json;
+  const router = en.hosts.find((h) => h.id === 'router');
+  assert.equal(router.supported, true); assert.equal(router.right, true);
+  assert.ok(router.data.findings.some((f) => f.code === 'aspm'));
+  assert.ok(router.data.shares.length > 1);
+  assert.equal((await call('POST', '/api/hosts/router/energy', { action: 'apply' })).status, 200);
+  const after = (await call('GET', '/api/energy')).json.hosts.find((h) => h.id === 'router');
+  assert.ok(!after.data.findings.some((f) => f.code === 'aspm'), 'nach dem Einschalten keine ASPM-Warnung mehr');
+  assert.equal((await call('POST', '/api/hosts/router/energy', { action: 'exclude', arg: ['0000:01:00.0'] })).status, 200);
+  assert.equal((await call('POST', '/api/hosts/router/energy', { action: 'exclude', arg: ['x;id'] })).status, 400);
+  assert.equal((await call('POST', '/api/hosts/router/energy', { action: 'off', arg: 'kaputt' })).status, 400);
+  assert.equal((await call('POST', '/api/hosts/router/energy', { action: 'quatsch' })).status, 400);
+  const pve = await call('POST', '/api/hosts/pve/energy', { action: 'apply' });
+  assert.equal(pve.status, 400); assert.match(pve.json.error, /nicht freigegeben/);
+  await close();
+});
