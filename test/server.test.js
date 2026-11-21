@@ -126,6 +126,22 @@ test('statische Dateien: Pfad-Tricks werden abgewehrt', async () => {
   close();
 });
 
+test('Schriften werden lokal ausgeliefert und im Stylesheet eingebunden', async () => {
+  const { app, close } = await boot();
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const css = await (await fetch(`${base}/style.css`)).text();
+  const urls = [...css.matchAll(/url\((fonts\/[^)]+\.woff2)\)/g)].map((m) => m[1]);
+  assert.equal(urls.length, 4);
+  assert.ok(!/fonts\.googleapis|fonts\.gstatic/.test(css), 'keine Schriften aus dem Internet (CSP und Datenschutz)');
+  for (const u of urls) {
+    const r = await fetch(`${base}/${u}`);
+    assert.equal(r.status, 200, u);
+    assert.equal(r.headers.get('content-type'), 'font/woff2');
+    assert.equal(Buffer.from(await r.arrayBuffer()).subarray(0, 4).toString(), 'wOF2');
+  }
+  close();
+});
+
 // ---- Statistik, Testliste, Pools (mit erfundenem Verlauf) ----
 async function bootSeeded() {
   const clock = () => new Date(2026, 10, 3, 9, 0);

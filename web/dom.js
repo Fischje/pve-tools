@@ -14,6 +14,7 @@ export function h(tag, props = {}, ...kids) {
   for (const [k, v] of Object.entries(props ?? {})) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v; // über CSSOM, ein style-Attribut würde die CSP blockieren
     else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else if (['value', 'checked', 'disabled', 'selected'].includes(k)) el[k] = v;
     else el.setAttribute(k, v === true ? '' : v);

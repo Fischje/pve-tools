@@ -1,17 +1,29 @@
+/* ---- Schriften (lokal, Google Fonts unter SIL Open Font License, siehe fonts/OFL-*.txt) ---- */
+@font-face { font-family: 'Afacad Flux'; font-style: normal; font-weight: 100 1000; font-display: swap; src: url(fonts/afacad-flux-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Afacad Flux'; font-style: normal; font-weight: 100 1000; font-display: swap; src: url(fonts/afacad-flux-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: 'Miranda Sans'; font-style: normal; font-weight: 400 700; font-display: swap; src: url(fonts/miranda-sans-latin.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: 'Miranda Sans'; font-style: normal; font-weight: 400 700; font-display: swap; src: url(fonts/miranda-sans-latin-ext.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+
+/* ---- Farben: 80er Synth-Pop – Neon Gelb, Grün und Blau auf Nachtblau ---- */
 :root {
-  --bg: #f4f6f8; --panel: #ffffff; --panel2: #eef1f5; --text: #1b2430; --muted: #5d6b7d; --line: #d9dfe7; --accent: #2457c5;
-  --ok: #1a7f4b; --ok-bg: #e3f4ea; --watch: #8a6100; --watch-bg: #fff2cc; --replace: #b5470c; --replace-bg: #ffe3d1; --critical: #b3261e; --critical-bg: #fde0de; --unknown: #5d6b7d; --unknown-bg: #e6e9ee;
-  --radius: 12px; --shadow: 0 1px 2px rgba(20,30,50,.08), 0 4px 14px rgba(20,30,50,.06);
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0f141b; --panel: #171e28; --panel2: #1e2733; --text: #e6ebf2; --muted: #9aa8bb; --line: #2a3544; --accent: #7aa2ff;
-    --ok: #5fd08f; --ok-bg: #12301f; --watch: #f0c04a; --watch-bg: #3a2f10; --replace: #ff9a5c; --replace-bg: #3e2314; --critical: #ff7b72; --critical-bg: #40191a; --unknown: #9aa8bb; --unknown-bg: #232c38;
-    --shadow: 0 1px 2px rgba(0,0,0,.4);
-  }
+  color-scheme: dark;
+  --bg: #060818; --panel: rgba(11, 15, 36, .86); --panel2: rgba(34, 48, 92, .45); --text: #ecf5ff; --muted: #a3b6d4; --line: rgba(84, 196, 255, .24);
+  --accent: #38d8ff; --neon-blue: #38d8ff; --neon-green: #3dffa8; --neon-yellow: #ffe94d; --on-accent: #03101c;
+  --ok: #3dffa8; --ok-bg: rgba(61, 255, 168, .13); --watch: #ffe94d; --watch-bg: rgba(255, 233, 77, .13); --replace: #ffa24f; --replace-bg: rgba(255, 162, 79, .14);
+  --critical: #ff5e8e; --critical-bg: rgba(255, 94, 142, .15); --unknown: #93a6c4; --unknown-bg: rgba(147, 166, 196, .13);
+  --radius: 12px; --shadow: 0 0 0 1px rgba(56, 216, 255, .04), 0 10px 30px rgba(0, 0, 0, .45);
+  --font-head: 'Afacad Flux', 'Miranda Sans', system-ui, sans-serif; --font-body: 'Miranda Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+html { background: var(--bg); }
+body { margin: 0; min-height: 100vh; color: var(--text); font: 15px/1.55 var(--font-body);
+  background: radial-gradient(ellipse 90% 45% at 50% 62%, rgba(61, 255, 168, .10), transparent 70%),
+              radial-gradient(ellipse 60% 30% at 50% 58%, rgba(255, 233, 77, .07), transparent 70%),
+              linear-gradient(180deg, #04050f 0%, #070b22 45%, #06142a 100%) fixed; }
 #app { max-width: 1200px; margin: 0 auto; padding: 0 16px 48px; }
 h1, h2, h3 { line-height: 1.25; margin: 0; }
 h2 { font-size: 1.15rem; }
@@ -101,10 +113,9 @@ details summary { cursor: pointer; margin: 8px 0; }
 .panel2 { margin: 10px 0; }
 
 /* ---- Diagramme ---- */
-:root { --c-long: #6b4fd3; --c-run: #2457c5; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --c-long: #b79cff; --c-run: #7aa2ff; } }
+:root { --c-long: #5a8cff; --c-run: #38d8ff; }
 svg.chart { width: 100%; height: auto; display: block; }
-svg.chart text { font: 11px system-ui, sans-serif; fill: var(--muted); }
+svg.chart text { font: 11px var(--font-body); fill: var(--muted); }
 svg.chart text.strong { fill: var(--text); font-weight: 650; }
 svg.chart text.bad { fill: var(--critical); }
 svg.chart text.dim { opacity: .7; font-size: 10px; }
@@ -224,3 +235,81 @@ button.version:hover { color: var(--accent); border-color: var(--accent); }
 .pline { fill: none !important; }
 .legend .sw.bar-p0 { background: var(--accent); } .legend .sw.bar-p1 { background: var(--c-long); } .legend .sw.bar-p2 { background: var(--ok); } .legend .sw.bar-p3 { background: var(--watch); } .legend .sw.bar-p4 { background: var(--replace); }
 td.num { text-align: right; font-variant-numeric: tabular-nums; } .better { color: var(--ok); } .worse { color: var(--critical); }
+
+/* ---- 80er Synth-Pop: Laser-Gitter im Hintergrund, Neon-Akzente ---- */
+/* Boden-Gitter: perspektivisch gekippt, wandert ganz langsam auf den Betrachter zu. Nur transform wird animiert (schont die CPU). */
+body::before { content: ''; position: fixed; z-index: 0; pointer-events: none; left: -60%; right: -60%; top: 56vh; height: 120vh;
+  background-image: linear-gradient(rgba(56, 216, 255, .30) 1px, transparent 1px), linear-gradient(90deg, rgba(61, 255, 168, .22) 1px, transparent 1px);
+  background-size: 64px 64px; transform-origin: 50% 0; transform: perspective(420px) rotateX(68deg) translateY(-64px);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 70%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 70%, transparent 100%);
+  opacity: .55; animation: laser-grid 9s linear infinite; }
+@keyframes laser-grid { to { transform: perspective(420px) rotateX(68deg) translateY(0); } }
+/* Himmel: feines Gitter, Horizontlinie und schwache Scanlines */
+body::after { content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(180deg, transparent calc(56vh - 1px), rgba(255, 233, 77, .35) 56vh, rgba(61, 255, 168, .18) calc(56vh + 2px), transparent calc(56vh + 3px)),
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, .018) 0 1px, transparent 1px 3px),
+    linear-gradient(rgba(56, 216, 255, .05) 1px, transparent 1px), linear-gradient(90deg, rgba(56, 216, 255, .05) 1px, transparent 1px);
+  background-size: 100% 100%, 100% 3px, 80px 80px, 80px 80px;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 56vh, rgba(0,0,0,.6) 100%); mask-image: linear-gradient(180deg, #000 0%, #000 56vh, rgba(0,0,0,.6) 100%); }
+@media (prefers-reduced-motion: reduce) { body::before { animation: none; transform: perspective(420px) rotateX(68deg); } }
+#app { position: relative; z-index: 1; }
+
+/* Schrift: Afacad Flux für Überschriften und Kennzahlen, Miranda Sans für Fließtext */
+h1, h2, h3, h4, .brand, .summary, nav.tabs button, .tabs2 button, .kpi .v, .fold-title, .fig figcaption, .sec-title, .model, .navhead, .dlg-head, th, .pill, button.version {
+  font-family: var(--font-head); }
+h2 { font-size: 1.35rem; letter-spacing: .02em; } h3 { font-size: 1.15rem; }
+th { text-transform: uppercase; letter-spacing: .08em; font-size: .78rem; color: var(--neon-blue); opacity: .85; }
+.brand b { font-size: 1.45rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  background: linear-gradient(90deg, var(--neon-yellow), var(--neon-green) 45%, var(--neon-blue)); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 10px rgba(61, 255, 168, .35)); }
+.summary { font-size: 1.45rem; font-weight: 600; }
+
+/* Kopfleiste: halbtransparent mit Neon-Kante */
+header.top { background: rgba(5, 7, 22, .82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); margin: 0 -16px; padding: 14px 16px 0; }
+header.top::after { content: ''; display: block; height: 2px; margin: 0 -16px; background: linear-gradient(90deg, transparent, var(--neon-yellow) 20%, var(--neon-green) 50%, var(--neon-blue) 80%, transparent); opacity: .7; }
+nav.tabs { border-bottom: 0; } nav.tabs button { color: var(--muted); font-size: 1.05rem; letter-spacing: .03em; }
+nav.tabs button:hover { color: var(--text); }
+nav.tabs button[aria-current=page], .tabs2 button[aria-selected=true] { color: var(--neon-green); border-bottom-color: var(--neon-green); text-shadow: 0 0 10px rgba(61, 255, 168, .55); }
+
+/* Flächen: leicht durchscheinend, damit das Gitter schwach durchschimmert; Text bleibt auf dunklem Grund gut lesbar */
+.card, .panel, .fig, .kpi, .fold, .banner, .hostnav, dialog { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+dialog { background: #0a0e24; box-shadow: 0 0 0 1px rgba(56, 216, 255, .25), 0 0 40px rgba(56, 216, 255, .15), 0 20px 60px rgba(0, 0, 0, .7); }
+dialog::backdrop { background: rgba(2, 3, 12, .72); }
+.panel, .fig, .fold, .kpi { background-image: repeating-linear-gradient(135deg, rgba(56, 216, 255, .022) 0 2px, transparent 2px 14px); }
+.kpi { border-top: 2px solid rgba(56, 216, 255, .5); }
+.kpi .v { font-size: 2rem; font-weight: 650; color: var(--neon-blue); text-shadow: 0 0 14px rgba(56, 216, 255, .35); }
+.kpi.ok .v { text-shadow: 0 0 14px rgba(61, 255, 168, .35); } .kpi.watch .v { text-shadow: 0 0 14px rgba(255, 233, 77, .35); } .kpi.bad .v { text-shadow: 0 0 14px rgba(255, 94, 142, .35); }
+button.kpi.link:hover, .card:hover { border-color: rgba(56, 216, 255, .55); }
+.card.ok { box-shadow: var(--shadow), 0 -6px 18px -12px var(--ok); } .card.watch { box-shadow: var(--shadow), 0 -6px 18px -12px var(--watch); }
+.card.replace { box-shadow: var(--shadow), 0 -6px 18px -12px var(--replace); } .card.critical { box-shadow: var(--shadow), 0 -6px 18px -12px var(--critical); }
+
+/* Bedienelemente */
+button { background: rgba(30, 44, 88, .55); }
+button:hover { border-color: var(--accent); box-shadow: 0 0 10px rgba(56, 216, 255, .25); }
+button.primary { background: linear-gradient(90deg, var(--neon-green), var(--neon-blue)); color: var(--on-accent); font-weight: 650; box-shadow: 0 0 14px rgba(61, 255, 168, .3); }
+button.primary:hover { box-shadow: 0 0 20px rgba(61, 255, 168, .5); }
+button.danger { border-color: rgba(255, 94, 142, .45); }
+input[type=text], input[type=number], input[type=password], input[type=time], select { background: rgba(3, 6, 18, .9); }
+input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(56, 216, 255, .3); outline: none; }
+select option { background: #0a0e24; color: var(--text); }
+.seg button[aria-pressed=true], .navitem.on { background: linear-gradient(90deg, var(--neon-green), var(--neon-blue)); color: var(--on-accent); }
+.navitem.on .sub { color: var(--on-accent); }
+input[type=checkbox], input[type=radio] { accent-color: var(--neon-green); }
+:focus-visible { outline-color: var(--neon-yellow); }
+
+/* Status-Punkte und Balken leuchten */
+.dot.ok { box-shadow: 0 0 8px var(--ok); } .dot.watch { box-shadow: 0 0 8px var(--watch); } .dot.replace { box-shadow: 0 0 8px var(--replace); } .dot.critical { box-shadow: 0 0 8px var(--critical); }
+.meter { background: rgba(3, 6, 18, .8); box-shadow: inset 0 0 0 1px var(--line); }
+.meter > span { background: linear-gradient(90deg, var(--neon-blue), var(--neon-green)); box-shadow: 0 0 10px rgba(61, 255, 168, .5); }
+.meter.watch > span { background: linear-gradient(90deg, var(--neon-green), var(--neon-yellow)); box-shadow: 0 0 10px rgba(255, 233, 77, .5); }
+.meter.replace > span { box-shadow: 0 0 10px rgba(255, 162, 79, .5); } .meter.critical > span { box-shadow: 0 0 10px rgba(255, 94, 142, .5); }
+.pill { letter-spacing: .02em; }
+.run-dot { box-shadow: 0 0 8px var(--c-run); }
+
+/* Diagramme: Text in farbigen Zellen dunkel (Neonfarben sind hell), Linien mit leichtem Glühen */
+svg.chart text.cell-num { fill: var(--on-accent); }
+.line, .pline, svg.spark polyline { filter: drop-shadow(0 0 3px rgba(56, 216, 255, .6)); }
+.band { opacity: .14; }
+pre.log, code { background: rgba(3, 6, 18, .85); } pre.log { border: 1px solid var(--line); }
+button.linkish { color: var(--neon-blue); }

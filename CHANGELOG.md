@@ -3,6 +3,12 @@
 Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
 Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
 
+## 0.6.9 – 2026-11-21
+- Neuer Look im Stil der 80er (Synth-Pop): Neonfarben Gelb, Grün und Blau auf dunklem Grund, im Hintergrund ein schwaches Laser-Gitter, das langsam wandert.
+- Schriften Afacad Flux (Überschriften, Kennzahlen) und Miranda Sans (Text); sie werden vom Tool selbst geladen, nicht aus dem Internet.
+- Wer in den Systemeinstellungen „Bewegung reduzieren“ eingeschaltet hat, sieht das Gitter still.
+- Einige Abstände und Feldbreiten wurden vom Browser bisher ignoriert und stimmen jetzt.
+
 ## 0.6.8 – 2026-11-21
 - Stromverbrauch mit Tasmota-Steckdosen: jede Minute gelesen, Verbrauch jetzt, heute, Ø 7 Tage, Hochrechnung aufs Jahr in kWh und Euro.
 - Verlauf der letzten 24 Stunden je Steckdose und Verbrauch je Tag der letzten 30 Tage.

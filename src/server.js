@@ -22,7 +22,7 @@ const WEB = path.join(ROOT, 'web');
 // Versionsnummer und Änderungen: einmal beim Start gelesen (ein Update startet den Dienst ohnehin neu).
 const CHANGES = loadChangelog(path.join(ROOT, 'CHANGELOG.md'));
 export const VERSION = CHANGES[0]?.version ?? '0.0.0';
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' };
 
 export function createApp({ db, engine, auth, allowPublic = false, provisioner = null, notifier = engine.notifier ?? null }) {
   const send = (res, status, body, headers = {}) => {
