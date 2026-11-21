@@ -1,6 +1,7 @@
 // Steuerung: fragt die Hosts ab, speichert Messwerte, wertet Testergebnisse aus und startet/bricht Tests nach Zeitplan.
 import { rateKernel } from './kernel.js';
 import { Orchestrator } from './orchestrator.js';
+import { PowerMeters } from './power.js';
 import { DEFAULT_SETTINGS, decide, canStartManual, advanceProgress, dayKey } from './schedule.js';
 import { rate } from './rating.js';
 import { dueSnapshots, SNAP_DEFAULTS, LABEL_DE, planOf, cleanPlan } from './snapshots.js';
@@ -24,6 +25,7 @@ export class Engine {
     this.db = db; this.hosts = hosts; this.makeClient = makeClient; this.now = now; this.log = log;
     this.clients = new Map(); this.lastDecision = new Map(); this.busy = new Set();
     this.orch = new Orchestrator(this);
+    this.power = new PowerMeters(this);
   }
 
   addHost(h) { if (this.hosts.some((x) => x.id === h.id)) throw new Error('Kennung existiert schon'); this.hosts.push(h); }
@@ -188,6 +190,8 @@ export class Engine {
 
   /** Einmal pro Minute: Abfragen, wenn nötig, und nach Zeitplan handeln. */
   async tick() {
+    // Strommessung zuerst: schnell (höchstens 5 s je Steckdose, parallel) und unabhängig von langen Host-Abfragen
+    try { await this.power.tick(); } catch (e) { this.log(`Strommessung: ${e.message}`); }
     for (const host of this.hosts) {
       if (this.busy.has(host.id)) continue;
       this.busy.add(host.id);

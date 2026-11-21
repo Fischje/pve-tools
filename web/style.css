@@ -217,3 +217,10 @@ button.version { border: 1px solid var(--line); background: var(--panel2); color
 button.version:hover { color: var(--accent); border-color: var(--accent); }
 .cl-entry { border-bottom: 1px solid var(--line); padding: 8px 0 10px; } .cl-entry:last-of-type { border: 0; }
 .cl-entry h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .cl-entry ul { margin: 6px 0 0; padding-left: 20px; } .cl-entry li { margin: 3px 0; }
+
+/* ---- Strommessung ---- */
+.pline { stroke-width: 2; } .pline.p0, .bar-p0 { stroke: var(--accent); fill: var(--accent); } .pline.p1, .bar-p1 { stroke: var(--c-long); fill: var(--c-long); }
+.pline.p2, .bar-p2 { stroke: var(--ok); fill: var(--ok); } .pline.p3, .bar-p3 { stroke: var(--watch); fill: var(--watch); } .pline.p4, .bar-p4 { stroke: var(--replace); fill: var(--replace); }
+.pline { fill: none !important; }
+.legend .sw.bar-p0 { background: var(--accent); } .legend .sw.bar-p1 { background: var(--c-long); } .legend .sw.bar-p2 { background: var(--ok); } .legend .sw.bar-p3 { background: var(--watch); } .legend .sw.bar-p4 { background: var(--replace); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; } .better { color: var(--ok); } .worse { color: var(--critical); }

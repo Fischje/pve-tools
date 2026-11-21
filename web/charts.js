@@ -152,3 +152,34 @@ export function figure(heading, chart, { legend = [], note = null, wide = false 
     legend.length ? h('div', { class: 'legend' }, legend.map(([cls, t]) => h('span', {}, h('i', { class: `sw ${cls}` }), t))) : null,
     note ? h('p', { class: 'sub' }, note) : null);
 }
+
+/** Leistung über die Zeit (W): mehrere Reihen, je eine Linie. series: [{label, cls, points:[{ts, watts}]}] */
+export function powerChart(series, { fromMs, toMs, label = 'Leistung' }) {
+  const W = 620, H = 200, L = 44, R = 10, T = 14, B = 26;
+  const svg = svgRoot(W, H, label);
+  const pts = series.flatMap((x) => x.points);
+  if (pts.length < 2) { svg.append(s('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle' }, 'Noch zu wenige Messungen')); return svg; }
+  const hi = Math.max(10, Math.ceil(Math.max(...pts.map((p) => p.watts)) / 10) * 10);
+  const x = (t) => L + ((t - fromMs) / (toMs - fromMs)) * (W - L - R), y = (v) => T + (H - T - B) * (1 - v / hi);
+  for (let i = 0; i <= 4; i++) { const v = (hi / 4) * i; svg.append(s('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), class: 'grid' }), s('text', { x: L - 6, y: y(v) + 4, 'text-anchor': 'end' }, `${Math.round(v)} W`)); }
+  for (const se of series) if (se.points.length > 1) svg.append(s('polyline', { points: se.points.map((p) => `${x(p.ts).toFixed(1)},${y(p.watts).toFixed(1)}`).join(' '), class: `pline ${se.cls}`, fill: 'none' }, title(se.label)));
+  for (const f of [0, 0.5, 1]) { const t = fromMs + (toMs - fromMs) * f, d = new Date(t); svg.append(s('text', { x: x(t), y: H - 8, 'text-anchor': f === 0 ? 'start' : f === 1 ? 'end' : 'middle' }, `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`)); }
+  return svg;
+}
+
+/** Verbrauch je Tag (kWh) als Säulen, gestapelt nach Steckdose. days: [{day, parts:[{cls, kwh, label}]}] */
+export function dailyBars(days, { label = 'Verbrauch je Tag' } = {}) {
+  const W = 620, H = 200, L = 44, R = 10, T = 14, B = 26;
+  const svg = svgRoot(W, H, label);
+  if (!days.length) { svg.append(s('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle' }, 'Noch keine Tageswerte')); return svg; }
+  const sums = days.map((d) => d.parts.reduce((a, p) => a + p.kwh, 0));
+  const hi = Math.max(0.5, Math.ceil(Math.max(...sums) * 2) / 2);
+  const bw = (W - L - R) / days.length, y = (v) => T + (H - T - B) * (1 - v / hi);
+  for (let i = 0; i <= 4; i++) { const v = (hi / 4) * i; svg.append(s('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), class: 'grid' }), s('text', { x: L - 6, y: y(v) + 4, 'text-anchor': 'end' }, `${(Math.round(v * 10) / 10).toLocaleString('de-DE')}`)); }
+  days.forEach((d, i) => {
+    let acc = 0;
+    for (const p of d.parts) { if (p.kwh <= 0) continue; svg.append(s('rect', { x: L + i * bw + 1, y: y(acc + p.kwh), width: Math.max(1, bw - 2), height: Math.max(0, y(acc) - y(acc + p.kwh)), class: p.cls }, title(`${d.day.slice(8)}.${d.day.slice(5, 7)}. ${p.label}: ${p.kwh.toLocaleString('de-DE')} kWh`))); acc += p.kwh; }
+  });
+  for (const i of [0, Math.floor(days.length / 2), days.length - 1]) svg.append(s('text', { x: L + i * bw + bw / 2, y: H - 8, 'text-anchor': 'middle' }, `${days[i].day.slice(8)}.${days[i].day.slice(5, 7)}.`));
+  return svg;
+}

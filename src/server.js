@@ -129,6 +129,14 @@ export function createApp({ db, engine, auth, allowPublic = false, provisioner =
       return send(res, 200, { ok: true });
     }
     if (route === 'GET /api/energy') return send(res, 200, energyOverview(engine));
+    if (route === 'POST /api/power') {
+      const b = await readBody(req);
+      try {
+        if (b.action === 'save') { await engine.power.save(b.meters ?? [], b.price); return send(res, 200, { ok: true }); }
+        if (b.action === 'test') return send(res, 200, { ok: true, reading: await engine.power.test(b.address, b.password, b.id) });
+        throw new Error('Unbekannte Aktion');
+      } catch (e) { return send(res, 400, { error: e.message }); }
+    }
     if (route === 'GET /api/stats') return send(res, 200, statsOverview(engine));
     if (route === 'GET /api/tests') {
       const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit')) || 300));
@@ -262,6 +270,9 @@ async function main() {
     const { seedDemo } = await import('./demo/seed.js');
     for (const h of hosts) await engine.pollHost(h.id);
     seedDemo(db, hosts, now());
+    const { seedPower, demoReader } = await import('./demo/power.js');
+    seedPower(db, hosts, now());
+    engine.power.read = demoReader(demoWorld, now, db);
   }
   const auth = new Auth(db);
   // Im Demo-Modus werden nie echte Mails verschickt.

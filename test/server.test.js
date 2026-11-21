@@ -420,3 +420,23 @@ test('Energie per API: Übersicht je Host, ASPM-Aktionen nur mit Recht, Eingaben
   assert.equal(pve.status, 400); assert.match(pve.json.error, /nicht freigegeben/);
   await close();
 });
+
+test('Strommessung per API: speichern, Übersicht mit Werten und Vorher/Nachher, Passwort nie in der Antwort', async () => {
+  const { call, close, engine } = await boot();
+  engine.power.resolve = async (a) => [a];
+  engine.power.read = async () => ({ power: 42.5, today: 0.8, yesterday: 1.1, total: 500, voltage: 230 });
+  assert.equal((await call('POST', '/api/power', { action: 'save', price: '0,30', meters: [{ id: 'steckdose-pve', label: 'pve', address: '10.0.0.5', hostId: 'pve', password: 'geheim123' }] })).status, 200);
+  assert.equal((await call('POST', '/api/power', { action: 'save', meters: [{ id: 'x', address: '8.8.8.8' }] })).status, 400);
+  await engine.power.tick();
+  const en = (await call('GET', '/api/energy'));
+  assert.doesNotMatch(en.text, /geheim123/);
+  const p = en.json.power;
+  assert.equal(p.price, 0.3);
+  assert.equal(p.meters[0].passwordSet, true);
+  assert.equal(p.meters[0].latest.power, 42.5);
+  assert.equal(p.total.power, 42.5);
+  const t = (await call('POST', '/api/power', { action: 'test', address: '10.0.0.5', id: 'steckdose-pve' })).json;
+  assert.equal(t.reading.power, 42.5);
+  assert.equal((await call('POST', '/api/power', { action: 'quatsch' })).status, 400);
+  await close();
+});

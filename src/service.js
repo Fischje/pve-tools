@@ -1,6 +1,7 @@
 // Bereitet die Daten für die Oberfläche auf (Bewertung, nächste Termine, Banner, Zusammenfassung).
 import { nextSlots, planOf } from './snapshots.js';
 import { rateEnergy, cstateShares } from './energy.js';
+import { dailyKwh, avgWatts } from './power.js';
 import { rate, LEVEL_LABEL, LEVEL_ORDER } from './rating.js';
 import { testWindow, nextPlanned, blockedIntervals, dayAllowed, dayKey, DEFAULT_SETTINGS } from './schedule.js';
 import { ratePool } from './zfs.js';
@@ -285,7 +286,7 @@ export function backupOverview(engine) {
 export function energyOverview(engine) {
   const now = engine.now();
   return {
-    now: iso(now),
+    now: iso(now), power: powerOverview(engine),
     hosts: engine.hosts.map((host) => {
       const hs = engine.db.getHostState(host.id);
       let e = null; try { e = JSON.parse(engine.db.getSetting(`energy:${host.id}`) ?? 'null'); } catch { /* leer */ }
@@ -296,4 +297,27 @@ export function energyOverview(engine) {
       };
     }),
   };
+}
+
+/** Strommessung: je Steckdose aktueller Wert, 24-h-Verlauf, Tageswerte, dazu Vergleich vorher/nachher bei Energie-Änderungen. */
+export function powerOverview(engine) {
+  const now = engine.now().getTime(), db = engine.db, pm = engine.power;
+  const meters = pm.meters().map((m) => {
+    const lat = pm.latest.get(m.id) ?? null;
+    const all = db.powerSince(m.id, now - 31 * 864e5);
+    const day = all.filter((x) => x.ts >= now - 864e5);
+    const week = avgWatts(all, now - 7 * 864e5, now);
+    return { ...m, passwordSet: !!db.getSetting(`power_pw:${m.id}`), latest: lat ? { ...lat, ts: iso(lat.ts), errorAt: iso(lat.errorAt) } : null,
+      series: day.map((x) => ({ ts: x.ts, watts: x.watts })), daily: dailyKwh(all).slice(-30), avg7d: week };
+  });
+  const changes = [];
+  for (const ev of db.events(500).filter((e) => /^Energie:/.test(e.text) && e.ts >= now - 60 * 864e5)) {
+    const m = meters.find((x) => x.hostId === ev.host_id); if (!m) continue;
+    const t = typeof ev.ts === 'number' ? ev.ts : Date.parse(ev.ts), all = db.powerSince(m.id, t - 864e5);
+    changes.push({ ts: iso(t), hostId: ev.host_id, text: ev.text.replace(/^Energie:\s*/, ''), before: avgWatts(all, t - 864e5, t), after: avgWatts(all, t, Math.min(now, t + 864e5)), complete: now - t >= 864e5 });
+  }
+  const sum = (f) => { const v = meters.map(f).filter((x) => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) * 10) / 10 : null; };
+  const avg = sum((m) => m.avg7d);
+  return { now: iso(now), price: pm.price(), meters, changes,
+    total: { power: sum((m) => (m.latest?.error ? null : m.latest?.power ?? null)), today: sum((m) => m.latest?.today ?? null), yesterday: sum((m) => m.latest?.yesterday ?? null), avg7d: avg, kwhYear: avg != null ? Math.round((avg * 8.766)) : null } };
 }

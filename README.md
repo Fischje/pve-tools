@@ -44,6 +44,7 @@ npm run demo        # Demo mit simulierten Hosts
 | `src/kernel.js` | Auswertung der Kernel-Meldungen zu SATA-/NVMe-Verbindungsfehlern |
 | `host-setup/autosnap-run` | Verwalteter Wrapper für proxmox-autosnap (liest /etc/autosnap.conf) |
 | `umzug-pve-tools.sh` | Einmaliger Umzug einer alten Installation (pve-disk-tool) auf die neuen Namen |
+| `src/power.js`, `src/tasmota.js` | Strommessung mit Tasmota-Steckdosen (Status 8), Verlauf und Tageswerte |
 | `src/energy.js` | Bereich „Energie“: Bestandsaufnahme (C-States, ASPM, CPU-Regelung) und Hinweise |
 | `host-setup/pvetools-aspm` | Schaltet ASPM für PCIe-Geräte ein (nach dem Vorbild von AutoASPM), mit Ausnahmeliste |
 | `src/orchestrator.js` | Backup-Lauf durch das Tool: Boot erkennen, Hosts nacheinander sichern, über die Aufgabenliste warten, PBS bei Erfolg herunterfahren |

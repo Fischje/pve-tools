@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS snap (host_id TEXT NOT NULL, vmid INTEGER NOT NULL, n
 CREATE TABLE IF NOT EXISTS backup_task (upid TEXT PRIMARY KEY, host_id TEXT NOT NULL, start INTEGER, end INTEGER, status TEXT, user TEXT, job TEXT, parsed INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS backup_guest (upid TEXT NOT NULL, vmid INTEGER NOT NULL, type TEXT, result TEXT, seconds INTEGER, note TEXT, PRIMARY KEY (upid, vmid));
 CREATE TABLE IF NOT EXISTS autosnap_state (host_id TEXT PRIMARY KEY, json TEXT, ts INTEGER);
+CREATE TABLE IF NOT EXISTS power_sample (meter TEXT NOT NULL, ts INTEGER NOT NULL, watts REAL, total REAL);
+CREATE INDEX IF NOT EXISTS power_sample_meter_ts ON power_sample(meter, ts);
 CREATE TABLE IF NOT EXISTS event (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, host_id TEXT, serial TEXT, text TEXT NOT NULL);
 `;
 
@@ -107,7 +109,9 @@ export function openDb(dir) {
       return { crc: r.crc, ts: d(r.ts) };
     },
     history: (serial, sinceMs) => q('SELECT ts,hours,temp,wear_used,reallocated,crc,media_errors,level FROM sample WHERE serial=? AND ts>=? ORDER BY ts').all(serial, sinceMs),
-    prune(now) { q('DELETE FROM sample WHERE ts<?').run(ms(now) - 800 * 864e5); q('DELETE FROM event WHERE ts<?').run(ms(now) - 365 * 864e5); },
+    addPower: (meter, ts, watts, total) => q('INSERT INTO power_sample(meter,ts,watts,total) VALUES(?,?,?,?)').run(meter, ms(ts), watts, total ?? null),
+    powerSince: (meter, sinceMs) => q('SELECT ts,watts,total FROM power_sample WHERE meter=? AND ts>=? ORDER BY ts').all(meter, sinceMs),
+    prune(now) { q('DELETE FROM sample WHERE ts<?').run(ms(now) - 800 * 864e5); q('DELETE FROM power_sample WHERE ts<?').run(ms(now) - 800 * 864e5); q('DELETE FROM event WHERE ts<?').run(ms(now) - 365 * 864e5); },
 
     addRun: (r) => Number(q('INSERT INTO testrun(serial,host_id,kind,started,ended,lba_from,lba_to,hours_at_start,origin,planned_minutes,result,note,completes_long) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)')
       .run(r.serial, r.hostId, r.kind, ms(r.started), ms(r.ended), r.from ?? null, r.to ?? null, r.hoursAtStart ?? null, r.origin ?? 'plan', r.plannedMinutes ?? null, r.result ?? 'running', r.note ?? null, r.completesLong ? 1 : 0).lastInsertRowid),

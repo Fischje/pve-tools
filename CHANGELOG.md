@@ -3,6 +3,12 @@
 Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
 Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
 
+## 0.6.8 – 2026-11-21
+- Stromverbrauch mit Tasmota-Steckdosen: jede Minute gelesen, Verbrauch jetzt, heute, Ø 7 Tage, Hochrechnung aufs Jahr in kWh und Euro.
+- Verlauf der letzten 24 Stunden je Steckdose und Verbrauch je Tag der letzten 30 Tage.
+- „Was hat eine Änderung gebracht?“: mittlere Leistung 24 Stunden vor und nach jeder Energie-Änderung (z. B. ASPM eingeschaltet).
+- Steckdosen im Reiter „Energie“ einrichten, mit Knopf „Testen“; ein Web-Passwort von Tasmota wird gespeichert, aber nie angezeigt.
+
 ## 0.6.7 – 2026-11-21
 - Neuer Reiter „Energie“: je Host Mainboard, BIOS, CPU-Regelung, wie viel Zeit die CPU in sparsamen Zuständen (C-States) verbringt, ASPM je PCIe-Gerät und SATA-Stromsparen, dazu Hinweise und eine BIOS-Checkliste.
 - ASPM einschalten nach dem Vorbild von AutoASPM (pvetools-aspm): für alle geeigneten Geräte, mit Ausnahmeliste, Ausschalten je Gerät und auf Wunsch bei jedem Start.
