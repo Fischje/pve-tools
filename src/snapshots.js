@@ -66,7 +66,9 @@ export function dueSnapshots(now, { pauseDay = null, enabled = true, uptimeSec =
 export function nextSlots(now, pauseDay = null, plan = null) {
   const p = planOf(plan), s = lastSlots(now, pauseDay, p);
   const [mh, mm] = hm(p.monthlyTime);
-  const hourly = new Date(s.hourly.getTime() + 60 * MIN);
+  let hourly = new Date(s.hourly.getTime() + 60 * MIN);
+  // Am Pausentag läuft nichts: der nächste stündliche Lauf ist dann am Folgetag kurz nach Mitternacht
+  if (pauseDay != null && hourly.getDay() === pauseDay) hourly = new Date(hourly.getFullYear(), hourly.getMonth(), hourly.getDate() + 1, 0, p.hourlyMinute, 0);
   const weekly = new Date(s.weekly); weekly.setDate(weekly.getDate() + 7);
   let monthly = new Date(s.monthly.getFullYear(), s.monthly.getMonth() + 1, p.monthlyDay, mh, mm, 0);
   if (pauseDay != null && monthly.getDay() === pauseDay) monthly = new Date(monthly.getFullYear(), monthly.getMonth(), p.monthlyDay + 1, mh, mm, 0);

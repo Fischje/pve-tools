@@ -3,6 +3,9 @@
 Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
 Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
 
+## 0.6.12 – 2026-11-23
+- Am Snapshot-Pausentag (z. B. Backup-Montag) zeigten „Läuft gerade“ und der Reiter „Snapshots“ trotzdem einen nächsten stündlichen Snapshot für heute an. Es wurde aber keiner gemacht, nur die Anzeige war falsch. Jetzt steht dort der richtige Zeitpunkt am Folgetag.
+
 ## 0.6.11 – 2026-11-23
 - Übersicht: neuer Bereich „Läuft gerade“ ganz oben. Er zeigt laufende Backup-Läufe, Backups auf den Hosts, Snapshot-Läufe und Plattentests, mit Fortschritt. Ein Klick öffnet die Einzelheiten. Läuft nichts, steht dort, was als Nächstes geplant ist.
 - Die Meldung oben („… brauchen Aufmerksamkeit“) ist anklickbar. Bei einer betroffenen Platte springt sie direkt hin, bei mehreren öffnet sie eine Liste mit Grund, z. B. „Nicht korrigierbare Lesefehler“.

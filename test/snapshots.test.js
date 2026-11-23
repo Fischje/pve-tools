@@ -46,3 +46,12 @@ test('Fehlschlag: erst nach 15 Minuten erneut versuchen', () => {
   assert.equal(dueSnapshots(now, { last: { ...last, hourly: { ts: d(2026, 11, 4, 14, 8).getTime(), ok: false } }, uptimeSec: 9999 }).some((x) => x.label === 'hourly'), false);
   assert.equal(dueSnapshots(d(2026, 11, 4, 14, 30), { last: { ...last, hourly: { ts: d(2026, 11, 4, 14, 8).getTime() - 3600e3, ok: false } }, uptimeSec: 9999 }).some((x) => x.label === 'hourly'), true);
 });
+
+test('Pausentag: kein Lauf fällig, Anzeige „nächster stündlicher“ erst am Folgetag', () => {
+  const mo = d(2026, 11, 23, 11, 59); // Montag = Pausentag 1
+  assert.deepEqual(dueSnapshots(d(2026, 11, 23, 12, 6), { pauseDay: 1, uptimeSec: 99999 }), []);
+  assert.deepEqual(nextSlots(mo, 1).hourly, d(2026, 11, 24, 0, 5));
+  assert.deepEqual(nextSlots(d(2026, 11, 22, 23, 30), 1).hourly, d(2026, 11, 24, 0, 5)); // Sonntagabend: Montag fällt ganz aus
+  assert.deepEqual(nextSlots(d(2026, 11, 24, 9, 30), 1).hourly, d(2026, 11, 24, 10, 5)); // Dienstag normal
+  assert.deepEqual(nextSlots(mo, null).hourly, d(2026, 11, 23, 12, 5)); // ohne Pausentag normal
+});
