@@ -32,6 +32,15 @@ export const fmtSize = (b) => (b == null ? '–' : b >= 1e12 ? `${(b / 1e12).toF
 export const fmtAge = (hrs) => (hrs == null ? '–' : hrs >= 8766 ? `${(hrs / 8766).toFixed(1).replace('.', ',')} Jahre` : `${Math.round(hrs / 24)} Tage`);
 export const fmtUp = (s) => (s == null ? '–' : s >= 86400 ? `${Math.floor(s / 86400)} Tage` : s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min` : `${Math.floor(s / 60)} min`);
 export const pill = (level, text) => h('span', { class: `pill ${level}` }, h('span', { 'aria-hidden': 'true' }, ICON[level] ?? '?'), text ?? LABEL[level]);
+const PROBLEM = new Set(['watch', 'replace', 'critical']);
+/** Zu einer Platte (kind 'disk', id = Seriennummer) oder einem Pool (kind 'pool', id = Name) springen: Host-Seite, Karte markiert, Befund sichtbar. */
+export function jumpTo({ hostId, kind, id }) { ctx.nav?.({ view: 'host', hostId, hostTab: kind === 'pool' ? 'zfs' : 'disks', focus: id }); }
+/** Wie pill(), bei einem Problem aber als Knopf, der zum Objekt springt. */
+export function statusPill(level, target, text) {
+  if (!target || !PROBLEM.has(level)) return pill(level, text);
+  return h('button', { type: 'button', class: `pill ${level} pill-go`, title: 'Zum Befund springen', onclick: (e) => { e.stopPropagation(); jumpTo(target); } },
+    h('span', { 'aria-hidden': 'true' }, ICON[level] ?? '?'), text ?? LABEL[level], h('span', { class: 'go', 'aria-hidden': 'true' }, '›'));
+}
 export const fact = (k, v, title) => h('div', { class: 'fact', title }, h('div', { class: 'k' }, k), h('div', { class: 'v' }, v));
 export const HOURS_HINT = 'Betriebsstunden, die die Platte selbst zählt. Das ist nicht das Alter seit dem Kauf: Zeiten, in denen der Rechner aus ist, zählen nicht (bei NVMe können auch Zeiten im Energiesparmodus fehlen).';
 export const fmtCount = (n) => (n == null ? '–' : n.toLocaleString('de-DE'));

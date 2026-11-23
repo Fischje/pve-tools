@@ -1,5 +1,5 @@
 // Host-Seite: links ein gruppiertes Menü (Host > Pools, Platten), rechts Überblick, Platten, ZFS (Pools und vdevs), Tests und Statistik des gewählten Hosts.
-import { h, HOURS_HINT, fmtCount, KIND, LABEL, ICON, fmtSize, fmtAge, fmtUp, fmtDT, fmtDate, pill, meter, fact, ctx, topFinding, kpiBox } from './dom.js';
+import { h, HOURS_HINT, fmtCount, KIND, LABEL, ICON, fmtSize, fmtAge, fmtUp, fmtDT, fmtDate, pill, statusPill, meter, fact, ctx, topFinding, kpiBox } from './dom.js';
 import { runningPanel, hostTestsPanel, allTestsPanel } from './tests-view.js';
 import { hostBody } from './stats-view.js';
 
@@ -44,7 +44,7 @@ function poolCard(host, p) {
           h('tbody', {}, v.devices.map((d) => {
             const disk = d.serial ? host.disks.find((x) => x.serial === d.serial) : null;
             return h('tr', {}, h('td', {}, h('code', { class: 'devname' }, d.name)),
-              h('td', {}, disk ? h('span', {}, disk.model, ' ', h('span', { class: 'sub' }, disk.device), ' ', pill(disk.level), ' ', h('button', { class: 'linkish', onclick: () => ctx.openDetail(host, disk) }, 'Details')) : h('span', { class: 'sub' }, 'nicht zugeordnet')),
+              h('td', {}, disk ? h('span', {}, disk.model, ' ', h('span', { class: 'sub' }, disk.device), ' ', statusPill(disk.level, { hostId: host.id, kind: 'disk', id: disk.serial }), ' ', h('button', { class: 'linkish', onclick: () => ctx.openDetail(host, disk) }, 'Details')) : h('span', { class: 'sub' }, 'nicht zugeordnet')),
               h('td', {}, statePill(d.state)), cnt(d.read), cnt(d.write), cnt(d.cksum), h('td', { class: 'sub' }, d.note || ''));
           })))));
     })));
@@ -63,21 +63,29 @@ function memberships(host) {
   return m;
 }
 
+/** Sprungziel zum schlimmsten auffälligen Objekt (Platte oder Pool) eines Hosts, sonst null. */
+function worstTarget(host) {
+  const rank = (l) => ['watch', 'replace', 'critical'].indexOf(l);
+  const all = [...host.disks.map((d) => ({ l: d.level, t: { view: 'host', hostId: host.id, hostTab: 'disks', focus: d.serial } })), ...host.pools.map((p) => ({ l: p.level, t: { view: 'host', hostId: host.id, hostTab: 'zfs', focus: p.name } }))]
+    .filter((x) => rank(x.l) >= 0).sort((a, b) => rank(b.l) - rank(a.l));
+  return all[0]?.t ?? null;
+}
+
 function overviewTab(host, data, stats, tests) {
   const lv = hostLevel(host), m = memberships(host);
   const counts = ORDER.map((l) => [l, host.disks.filter((d) => d.level === l).length]).filter(([, n]) => n);
   const w = host.window;
   const head = h('div', { class: 'kpis' },
-    kpiBox('Gesamtzustand', LABEL[lv] ?? 'Unbekannt', counts.map(([l, n]) => `${n}× ${LABEL[l]}`).join(' · ') || 'keine Platten', lv === 'ok' ? 'ok' : lv === 'unknown' ? '' : lv === 'watch' ? 'watch' : 'bad', { view: 'host', hostId: host.id, hostTab: 'disks' }),
+    kpiBox('Gesamtzustand', LABEL[lv] ?? 'Unbekannt', counts.map(([l, n]) => `${n}× ${LABEL[l]}`).join(' · ') || 'keine Platten', lv === 'ok' ? 'ok' : lv === 'unknown' ? '' : lv === 'watch' ? 'watch' : 'bad', worstTarget(host) ?? { view: 'host', hostId: host.id, hostTab: 'disks' }),
     kpiBox('Erreichbarkeit', host.reachable ? 'Online' : 'Offline', host.reachable ? `läuft seit ${fmtUp(host.uptimeSec)}` : (host.error ?? 'keine Antwort')),
     kpiBox('Testfenster', w.open ? 'offen' : 'zu', w.open ? `noch ${Math.floor(w.minutesLeft / 60)} h ${w.minutesLeft % 60} min` : w.reason, '', { view: 'zeitplan', tabs: { settings: 'zeitplan', 'settings-host': host.id } }),
     kpiBox('Letzte Abfrage', fmtDT(host.lastPoll), host.address ? `${host.address}${host.port && host.port !== 22 ? `:${host.port}` : ''}` : host.id));
   const poolRows = host.pools.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Pool', 'Zustand', 'Aufbau', 'Belegt', 'Letzter Scrub'].map((t) => h('th', {}, t)))),
-    h('tbody', {}, host.pools.map((p) => h('tr', {}, h('td', {}, h('button', { class: 'linkish', onclick: () => go(host.id, 'zfs', p.name) }, p.name)), h('td', {}, pill(p.level)), h('td', {}, p.vdevs.filter((v) => v.section === 'data').map((v) => v.type === 'disk' ? 'Einzelplatte' : v.name).join(', ')), h('td', {}, p.cap != null ? `${p.cap} % von ${fmtSize(p.size)}` : '–'),
+    h('tbody', {}, host.pools.map((p) => h('tr', {}, h('td', {}, h('button', { class: 'linkish', onclick: () => go(host.id, 'zfs', p.name) }, p.name)), h('td', {}, statusPill(p.level, { hostId: host.id, kind: 'pool', id: p.name })), h('td', {}, p.vdevs.filter((v) => v.section === 'data').map((v) => v.type === 'disk' ? 'Einzelplatte' : v.name).join(', ')), h('td', {}, p.cap != null ? `${p.cap} % von ${fmtSize(p.size)}` : '–'),
       h('td', {}, p.scan?.state === 'finished' ? `${fmtDate(p.scan.finishedAt)} (${p.scan.errors} Fehler)` : p.scan?.state === 'running' ? `läuft, ${p.scan.percent ?? '?'} %` : 'nie')))))) : h('p', { class: 'sub' }, 'Kein ZFS auf diesem Host.');
   const diskRows = h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Platte', 'Zustand', 'Temp.', 'Betriebszeit', 'Einschaltungen', 'Verschleiß', 'ZFS', 'Letzter Kurz-/Langtest'].map((t) => h('th', {}, t)))),
     h('tbody', {}, host.disks.map((d) => h('tr', {}, h('td', {}, h('button', { class: 'linkish', onclick: () => go(host.id, 'disks', d.serial) }, d.model), h('div', { class: 'sub' }, `${d.device} · ${KIND[d.kind]} · ${fmtSize(d.capacityBytes)}`)),
-      h('td', {}, pill(d.level), d.running ? h('div', { class: 'sub' }, '⏳ Test läuft') : null), h('td', {}, d.temperature != null ? `${d.temperature} °C` : '–'), h('td', { title: HOURS_HINT }, fmtAge(d.hours)), h('td', {}, fmtCount(d.powerCycles)), h('td', {}, d.wearUsed != null ? `${d.wearUsed} %` : '–'),
+      h('td', {}, statusPill(d.level, { hostId: host.id, kind: 'disk', id: d.serial }), d.running ? h('div', { class: 'sub' }, '⏳ Test läuft') : null), h('td', {}, d.temperature != null ? `${d.temperature} °C` : '–'), h('td', { title: HOURS_HINT }, fmtAge(d.hours)), h('td', {}, fmtCount(d.powerCycles)), h('td', {}, d.wearUsed != null ? `${d.wearUsed} %` : '–'),
       h('td', { class: 'sub' }, (m.get(d.serial) ?? ['–']).join(', ')), h('td', {}, `${fmtDate(d.lastShortOk)} / ${fmtDate(d.lastLongOk)}`))))));
   return [head, host.banner ? h('div', { class: 'banner' }, h('b', {}, `${host.label} ist erreichbar.`), host.banner.autoStart ? ` Ein fälliger Test startet automatisch${host.banner.startsInMin ? ` in ${host.banner.startsInMin} min` : ''}.` : ' Der Test startet erst nach deiner Freigabe (siehe Übersicht).') : null,
     ...(host.linkFindings ?? []).map((f) => h('div', { class: `banner ${f.level === 'replace' ? 'bad' : 'watch'}` }, h('b', {}, f.title), h('div', {}, f.text), h('div', { class: 'sub' }, `Was tun? ${f.advice}`))),

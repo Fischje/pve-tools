@@ -3,6 +3,12 @@
 Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
 Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
 
+## 0.6.11 – 2026-11-23
+- Übersicht: neuer Bereich „Läuft gerade“ ganz oben. Er zeigt laufende Backup-Läufe, Backups auf den Hosts, Snapshot-Läufe und Plattentests, mit Fortschritt. Ein Klick öffnet die Einzelheiten. Läuft nichts, steht dort, was als Nächstes geplant ist.
+- Die Meldung oben („… brauchen Aufmerksamkeit“) ist anklickbar. Bei einer betroffenen Platte springt sie direkt hin, bei mehreren öffnet sie eine Liste mit Grund, z. B. „Nicht korrigierbare Lesefehler“.
+- Zustände wie „Beobachten“ oder „Bald tauschen“ in Tabellen und Karten sind anklickbar und springen zur Platte bzw. zum Pool mit dem Befund. „Gesamtzustand“ auf der Host-Seite springt zum schlimmsten Befund.
+- Das Seitenmenü auf „Hosts im Detail“ bleibt beim Scrollen sichtbar.
+
 ## 0.6.10 – 2026-11-23
 - Hintergrund dunkler, Laser-Gitter etwas zurückhaltender.
 - Tabellen unter „Energie“: Überschriften der Zahlenspalten stehen jetzt rechtsbündig über den Zahlen, mehr Abstand zur Spalte danach.

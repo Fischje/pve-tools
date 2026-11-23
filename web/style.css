@@ -315,3 +315,37 @@ pre.log, code { background: rgba(3, 6, 18, .85); } pre.log { border: 1px solid v
 button.linkish { color: var(--neon-blue); }
 th.num { text-align: right; }
 td.num + td:not(.num), th.num + th:not(.num) { padding-left: 28px; }
+
+/* ---- Übersicht: Läuft gerade ---- */
+.jobs .card-title { margin-bottom: 4px; }
+.jobs.busy { border-color: rgba(61, 255, 168, .35); }
+.job-list { display: flex; flex-direction: column; gap: 6px; }
+.job-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 9px 12px; border-radius: 10px; background: var(--panel2); border: 1px solid var(--line); }
+.job-row:hover { border-color: var(--accent); }
+.job-row .run-dot { margin: 0; flex: none; }
+.job-snap .run-dot { background: var(--neon-yellow); box-shadow: 0 0 8px var(--neon-yellow); } .job-test .run-dot { background: var(--neon-blue); } .job-backup .run-dot { background: var(--neon-green); box-shadow: 0 0 8px var(--neon-green); }
+.job-t { flex: 1; min-width: 0; display: flex; flex-direction: column; } .job-t .sub { overflow-wrap: anywhere; }
+.job-p { flex: none; width: 140px; display: flex; align-items: center; gap: 8px; } .job-p .meter { flex: 1; }
+.go { color: var(--muted); font-size: 1.3rem; line-height: 1; flex: none; }
+.job-row:hover .go, .prob:hover .go { color: var(--accent); }
+.job-next { margin: 8px 0 0; }
+@media (max-width: 600px) { .job-row { flex-wrap: wrap; } .job-p { width: 100%; order: 3; } }
+
+/* ---- Anklickbare Zustände: springen zum Befund ---- */
+button.pill-go { border: 0; cursor: pointer; font-family: var(--font-head); }
+button.pill-go .go { font-size: 1rem; color: inherit; opacity: .7; }
+button.pill-go:hover { filter: brightness(1.25); box-shadow: 0 0 10px currentColor; }
+button.summary-go { background: transparent; border: 1px solid transparent; border-radius: 10px; padding: 2px 10px 2px 4px; margin-left: -4px; color: inherit; font-family: var(--font-head); }
+button.summary-go:hover { border-color: var(--accent); background: var(--panel2); }
+.summary-wrap { position: relative; }
+.probs { position: absolute; z-index: 20; top: calc(100% + 6px); left: 0; width: min(560px, 92vw); max-height: 60vh; overflow: auto; padding: 6px; display: flex; flex-direction: column; gap: 4px;
+  background: #0a0e24; border: 1px solid rgba(56, 216, 255, .35); border-radius: var(--radius); box-shadow: 0 0 30px rgba(56, 216, 255, .15), 0 16px 40px rgba(0, 0, 0, .7); font-size: .95rem; font-weight: 400; }
+.prob { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 8px; font-family: var(--font-body); }
+.prob:hover { background: var(--panel2); box-shadow: none; }
+.prob .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.prob-t { flex: 1; min-width: 0; } .prob-r { display: block; color: var(--muted); font-size: .85rem; }
+
+/* Seitenmenü der Host-Seite bleibt beim Scrollen sichtbar (das aside klebt, nicht das Menü darin) */
+.hostpage > aside { position: sticky; top: 166px; align-self: start; }
+.hostnav { position: static; max-height: calc(100vh - 184px); }
+[id] { scroll-margin-top: 175px; }

@@ -23,7 +23,7 @@ export function defaultsForHost(host) {
 export class Engine {
   constructor({ db, hosts, makeClient, now = () => new Date(), log = () => {} }) {
     this.db = db; this.hosts = hosts; this.makeClient = makeClient; this.now = now; this.log = log;
-    this.clients = new Map(); this.lastDecision = new Map(); this.busy = new Set();
+    this.clients = new Map(); this.lastDecision = new Map(); this.busy = new Set(); this.snapRunning = new Map();
     this.orch = new Orchestrator(this);
     this.power = new PowerMeters(this);
   }
@@ -238,7 +238,9 @@ export class Engine {
   async runSnapshot(hostId, label, { force = false, manual = false } = {}) {
     this.snapGuard(hostId);
     const now = this.now();
-    const r = await this.client(hostId).snapRun(label, { force });
+    this.snapRunning.set(hostId, { label, since: now.getTime(), manual });
+    let r;
+    try { r = await this.client(hostId).snapRun(label, { force }); } finally { this.snapRunning.delete(hostId); }
     const last = this.snapLast(hostId);
     last[label] = { ts: now.getTime(), ok: r.ok, text: r.text.slice(-200) };
     this.db.setSetting(`snaplast:${hostId}`, JSON.stringify(last));

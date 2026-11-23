@@ -116,8 +116,15 @@ export function overview(engine) {
   const watch = levels.filter((l) => l === 'watch').length;
   const worst = levels.reduce((a, b) => (LEVEL_ORDER.indexOf(b) > LEVEL_ORDER.indexOf(a) ? b : a), 'ok');
   const summary = bad ? `${bad} ${bad === 1 ? 'Platte braucht' : 'Platten brauchen'} Aufmerksamkeit` : watch ? `Alles läuft, ${watch} ${watch === 1 ? 'Platte wird' : 'Platten werden'} beobachtet` : 'Alles in Ordnung';
+  // Auffällige Objekte, schlimmste zuerst: Klick in der Kopfzeile springt direkt dorthin
+  const rank = (l) => LEVEL_ORDER.indexOf(l);
+  const reason = (findings, level) => (findings ?? []).find((f) => f.level === level) ?? (findings ?? []).find((f) => rank(f.level) > 0) ?? null;
+  const items = hosts.flatMap((x) => [
+    ...x.disks.filter((d) => rank(d.level) > 0).map((d) => ({ kind: 'disk', hostId: x.id, hostLabel: x.label, id: d.serial, label: `${d.model} (${String(d.device ?? '').replace('/dev/', '')})`, level: d.level, reason: reason(d.findings, d.level)?.title ?? null })),
+    ...x.pools.filter((p) => rank(p.level) > 0).map((p) => ({ kind: 'pool', hostId: x.id, hostLabel: x.label, id: p.name, label: `ZFS-Pool ${p.name}`, level: p.level, reason: reason(p.findings, p.level)?.title ?? null })),
+  ]).sort((a, b) => rank(b.level) - rank(a.level));
   return {
-    now: iso(now), summary: { text: summary, level: worst }, hosts,
+    now: iso(now), summary: { text: summary, level: worst, items }, hosts,
     events: db.events(50).map((e) => ({ ts: iso(e.ts), hostId: e.host_id, serial: e.serial, text: e.text })),
     defaults: DEFAULT_SETTINGS,
     polling: engine.pollingSettings(),
@@ -265,7 +272,7 @@ export function backupOverview(engine) {
     });
     return {
       id: host.id, label: host.label ?? host.id, reachable: !!hs?.reachable, supported, gate: { version: hs?.gateVersion ?? null, expected: EXPECTED_GATE_VERSION },
-      autosnap: as ? { ...as, ts: iso(as.ts), pauseToday } : null, snapControl: snapControl(engine, host.id, as, t), guests, tasks, runningJob: tasks.find((x) => x.running) ?? null,
+      autosnap: as ? { ...as, ts: iso(as.ts), pauseToday } : null, snapControl: snapControl(engine, host.id, as, t), snapRunning: (() => { const r = engine.snapRunning?.get(host.id); return r ? { label: r.label, since: iso(r.since), manual: r.manual } : null; })(), guests, tasks, runningJob: tasks.find((x) => x.running) ?? null,
       lastRun: tasks.find((x) => !x.running && x.parsed) ?? null, polledAt: iso(Number(db.getSetting(`backups_poll:${host.id}`) ?? 0) || null),
     };
   });

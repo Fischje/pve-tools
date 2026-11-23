@@ -1,5 +1,5 @@
 // Tests: was läuft gerade, Zeitplan je Platte und die Liste aller Tests. Wird in „Tests“ (alle Hosts) und auf der Host-Seite (ein Host) benutzt.
-import { h, KIND, RUN_LABEL, RESULT, fmtDate, fmtDT, fmtMin, dur, pill, meter, ctx } from './dom.js';
+import { h, KIND, RUN_LABEL, RESULT, fmtDate, fmtDT, fmtMin, dur, pill, statusPill, meter, ctx } from './dom.js';
 
 const RESULT_CLASS = { ok: 'ok', failed: 'critical', interrupted: 'watch', running: 'unknown' };
 const resultPill = (r) => h('span', { class: `pill ${RESULT_CLASS[r] ?? 'unknown'}` }, RESULT[r] ?? r);
@@ -33,7 +33,7 @@ export function hostTestsPanel(host, { showTitle = true } = {}) {
   const status = w.open ? `Testfenster offen, noch ${Math.floor(w.minutesLeft / 60)} h ${w.minutesLeft % 60} min` : `Gerade kein Test: ${w.reason}`;
   const rows = host.disks.map((d) => h('tr', {},
     h('td', {}, h('div', { class: 'model' }, d.model), h('div', { class: 'sub' }, `${d.device} · ${KIND[d.kind]}`)),
-    h('td', {}, d.running ? `⏳ ${RUN_LABEL[d.running.type]}${d.running.remainingPercent != null ? ` (noch ${d.running.remainingPercent} %)` : ''}` : pill(d.level)),
+    h('td', {}, d.running ? `⏳ ${RUN_LABEL[d.running.type]}${d.running.remainingPercent != null ? ` (noch ${d.running.remainingPercent} %)` : ''}` : statusPill(d.level, { hostId: host.id, kind: 'disk', id: d.serial })),
     h('td', {}, fmtDate(d.lastShortOk), h('div', { class: 'sub' }, `nächster: ${fmtDate(d.nextShort)}`)),
     h('td', {}, fmtDate(d.lastLongOk), h('div', { class: 'sub' }, `nächster: ${d.progress ? 'läuft in Abschnitten' : fmtDate(d.nextLong)}`)),
     h('td', {}, d.progress ? meter('Langtest', d.progress.percent, 'ok', `${d.progress.percent} % · Abschnitt ${d.progress.segments + 1}`) : (d.selective || d.kind !== 'hdd' ? '–' : h('span', { class: 'sub' }, 'keine selektiven Tests'))),

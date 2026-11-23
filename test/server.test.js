@@ -101,6 +101,13 @@ test('Übersicht: Hosts, Bewertung der Beispielplatten, Zusammenfassung', async 
   assert.equal(pve.disks.find((d) => d.serial === 'ZHZ0RHKE').level, 'replace');
   assert.equal(pve.disks.find((d) => d.serial === 'ZL2M2KFZ').level, 'ok');
   assert.match(o.summary.text, /Aufmerksamkeit/);
+  // Sprungliste der Kopfzeile: schlimmste zuerst, mit Ziel und Grund
+  const it = o.summary.items;
+  assert.ok(it.length >= 2);
+  assert.deepEqual(it.slice(0, 2).map((x) => x.level), ['replace', 'replace']);
+  assert.ok(it.some((x) => x.kind === 'disk' && x.hostId === 'pve' && x.id === 'ZHZ0RHKE' && x.reason));
+  assert.ok(it.every((x, i) => i === 0 || ['ok', 'watch', 'replace', 'critical'].indexOf(it[i - 1].level) >= ['ok', 'watch', 'replace', 'critical'].indexOf(x.level)));
+  assert.ok(!it.some((x) => x.level === 'ok'));
   assert.equal(o.hosts.find((h) => h.id === 'pbs').banner.autoStart, true);
   close();
 });

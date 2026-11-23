@@ -2,13 +2,14 @@
 // Alle Texte werden per textContent eingesetzt, nie als HTML (kein XSS durch Gerätenamen o. Ä.).
 
 import { ui, fold, subTabs, hostSwitch, saveUi } from './dom.js';
-import { HOURS_HINT, fmtCount, WD, KIND, ICON, LABEL, RUN_LABEL, RESULT, h, put, d2, fmtDate, fmtDT, fmtSize, fmtAge, fmtUp, pill, fact, meter, topFinding, wearLevel, ctx, fmtDay, fmtMin, dur } from './dom.js';
+import { HOURS_HINT, fmtCount, WD, KIND, ICON, LABEL, RUN_LABEL, RESULT, h, put, d2, fmtDate, fmtDT, fmtSize, fmtAge, fmtUp, pill, statusPill, jumpTo, fact, meter, topFinding, wearLevel, ctx, fmtDay, fmtMin, dur } from './dom.js';
 
 import { globalStats, hostStatsSection } from './stats-view.js';
 import { runningPanel, hostTestsPanel, allTestsPanel, setTestFilters } from './tests-view.js';
 import { hostPage, hostViewGo } from './host-view.js';
 import { backupsView } from './backups-view.js';
 import { energyView } from './energy-view.js';
+import { jobsPanel } from './jobs-view.js';
 
 const BRAND = "Fischje's PVE-Tools";
 document.title = BRAND;
@@ -61,7 +62,7 @@ function diskCard(host, d) {
   const kids = [
     h('div', { class: 'card-head' },
       h('div', {}, h('div', { class: 'model' }, d.model, h('span', { class: 'badge' }, KIND[d.kind] ?? d.kind)), h('div', { class: 'sub' }, `${d.device} · ${d.serial}`)),
-      pill(d.level)),
+      statusPill(d.level, { hostId: host.id, kind: 'disk', id: d.serial })),
   ];
   if (d.standby) kids.push(h('p', { class: 'sub' }, 'Die Platte schläft, letzter bekannter Stand.'));
   kids.push(h('p', { class: 'what' }, h('b', {}, tf?.title ?? ''), tf ? ` – ${tf.text}` : ''));
@@ -123,7 +124,7 @@ function poolsOverview() {
 
 function viewOverview() {
   if (!data.hosts.length) return h('p', { class: 'empty' }, 'Keine Hosts eingerichtet. Öffne den Reiter „Hosts einrichten“.');
-  return [data.hosts.filter((x) => x.gate?.outdated).map(outdatedBanner), data.hosts.map(bannerEl),
+  return [jobsPanel({ data, tests, backups }), data.hosts.filter((x) => x.gate?.outdated).map(outdatedBanner), data.hosts.map(bannerEl),
     stats ? globalStats(stats, data) : null, poolsOverview(), stats ? hostStatsSection(stats, data) : null,
     h('div', { class: 'sec-title', id: 'alle-platten' }, h('h2', {}, 'Alle Platten')), data.hosts.map(hostSection)];
 }
@@ -478,12 +479,29 @@ function render() {
   root.replaceChildren(...[
     h('header', { class: 'top' },
       h('div', { class: 'brand' }, h('b', {}, BRAND), data.version ? h('button', { class: 'version', title: 'Was ist neu? Änderungen anzeigen', onclick: () => openChangelog() }, `v${data.version}`) : null, h('span', { class: 'sub' }, 'Platten, ZFS, Backups, Energie')),
-      h('div', { class: 'title-row' }, h('div', { class: 'summary' }, h('span', { class: `dot ${data.summary.level}`, 'aria-hidden': 'true' }), h('span', { role: 'status' }, data.summary.text)), h('span', { class: 'sub' }, `Stand ${fmtDT(data.now)}`)),
+      h('div', { class: 'title-row' }, summaryEl(), h('span', { class: 'sub' }, `Stand ${fmtDT(data.now)}`)),
       h('nav', { class: 'tabs', 'aria-label': 'Bereiche' }, tabs.map(([id, t]) => h('button', { 'aria-current': view === id ? 'page' : null, onclick: () => { view = id; ui.dirty = false; render(); window.scrollTo(0, 0); } }, t))), pausedBar),
     !authState.passwordSet ? h('div', { class: 'banner warn' }, h('span', {}, 'Es ist noch kein Passwort gesetzt. Die Seite ist nur im lokalen Netz erreichbar, aber jeder dort kann Tests starten.'), h('button', { onclick: () => { ui.tabs.settings = 'konto'; view = 'zeitplan'; render(); } }, 'Passwort setzen')) : null,
     flashBox, body].flat(Infinity).filter(Boolean));
   window.scrollTo(0, scrollY);
 }
+
+// Kopfzeile: Zusammenfassung. Bei Auffälligkeiten anklickbar: eine Meldung springt direkt hin, mehrere öffnen eine Liste.
+let probsOpen = false;
+function summaryEl() {
+  const items = data.summary.items ?? [];
+  const inner = [h('span', { class: `dot ${data.summary.level}`, 'aria-hidden': 'true' }), h('span', { role: 'status' }, data.summary.text)];
+  if (!items.length) return h('div', { class: 'summary' }, inner);
+  const one = items.length === 1;
+  const btn = h('button', { type: 'button', class: 'summary summary-go', 'aria-expanded': one ? null : String(probsOpen), title: one ? `Zu ${items[0].label} springen` : 'Betroffene Platten und Pools zeigen',
+    onclick: () => { if (one) { probsOpen = false; jumpTo(items[0]); } else { probsOpen = !probsOpen; render(); } } }, inner, h('span', { class: 'go', 'aria-hidden': 'true' }, one ? '›' : probsOpen ? '▴' : '▾'));
+  if (one || !probsOpen) return btn;
+  const list = h('div', { class: 'probs', role: 'menu' }, items.map((it) => h('button', { type: 'button', role: 'menuitem', class: 'prob', onclick: () => { probsOpen = false; jumpTo(it); } },
+    h('span', { class: `dot ${it.level}`, 'aria-hidden': 'true' }), h('span', { class: 'prob-t' }, h('b', {}, it.label), h('span', { class: 'sub' }, ` · ${it.hostLabel}`), it.reason ? h('span', { class: 'prob-r' }, it.reason) : null),
+    pill(it.level), h('span', { class: 'go', 'aria-hidden': 'true' }, '›'))));
+  return h('div', { class: 'summary-wrap' }, btn, list);
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && probsOpen) { probsOpen = false; render(); } });
 
 async function load(redraw = true, auto = false) {
   if (!auto) ui.dirty = false; // jedes gewollte Neuladen (Speichern, Knopf) beendet die Bearbeitungs-Pause
@@ -504,7 +522,7 @@ function nav(t) {
   ui.dirty = false;
   if (t.tabs) { Object.assign(ui.tabs, t.tabs); saveUi(); }
   if (t.filters) setTestFilters(t.filters);
-  if (t.view === 'host') { view = 'host'; hostViewGo(t.hostId, t.hostTab ?? 'overview', null); } else { view = t.view; render(); }
+  if (t.view === 'host') { view = 'host'; hostViewGo(t.hostId, t.hostTab ?? 'overview', t.focus ?? null); if (t.focus) return; } else { view = t.view; render(); }
   if (t.scroll) requestAnimationFrame(() => { const el = document.getElementById(t.scroll); if (el) { el.scrollIntoView({ block: 'start', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1600); } });
   else window.scrollTo(0, 0);
 }
