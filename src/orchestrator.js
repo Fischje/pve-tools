@@ -129,6 +129,16 @@ export class Orchestrator {
         this.engine.event(s.pbsHostId, null, `PBS hochgefahren an einem ${WEEKDAYS[day]}: kein Backup-Tag, es wird nicht automatisch gesichert. Der PBS bleibt an („Jetzt Backup starten“ geht weiter von Hand).`);
         return;
       }
+      // Nur ein geplanter Lauf je Backup-Tag: fährt der PBS danach am selben Tag erneut hoch (von Hand o. Ä.), nicht noch einmal sichern
+      // und vor allem nicht wieder herunterfahren. Sonst entstünde eine Schleife aus Hochfahren, Lauf und Herunterfahren.
+      const bootDayStart = new Date(new Date(boot).getFullYear(), new Date(boot).getMonth(), new Date(boot).getDate()).getTime();
+      const prev = this.lastJob();
+      if (prev && !prev.manual && prev.startedAt >= bootDayStart) {
+        this.db.setSetting(BOOT_KEY, String(Math.round(boot)));
+        this.db.setSetting(SKIP_KEY, String(Math.round(boot)));
+        this.engine.event(s.pbsHostId, null, 'PBS erneut hochgefahren: Der geplante Backup-Lauf ist heute schon gelaufen. Es wird nicht noch einmal gesichert, der PBS bleibt an („PBS herunterfahren“ oder „Jetzt Backup starten“ gehen von Hand).');
+        return;
+      }
       await this.advance(this.begin(s, { bootAt: Math.round(boot), manual: false }), s);
     } catch (e) { this.engine.log(`Backup-Steuerung: ${e.stack ?? e.message}`); } finally { this.running = false; }
   }

@@ -144,6 +144,7 @@ test('Ohne Recht „Backups starten“ gibt es einen Fehler statt eines Starts; 
   // alles in Ordnung, aber ohne Recht zum Herunterfahren
   world.rights.set('pve', ['backup-starten']);
   for (const h of world.hosts) await engine.pollHost(h.id);
+  await advance(24 * 60); // am nächsten (Backup-)Tag: je Tag gibt es nur einen geplanten Lauf
   await bootPbs(); await o.tick(); await advance(31); await o.tick(); await advance(31); await o.tick();
   const job = o.job();
   assert.equal(job.phase, 'fertig'); assert.equal(job.shutdown, 'fehlt-recht');
@@ -331,3 +332,19 @@ test('PBS herunterfahren: abgelehnt, solange auf einem Host ein Backup läuft (a
   assert.deepEqual(calls('pbs'), ['poweroff']);
   assert.equal(world.state.get('pbs').up, false);
 });
+
+test('Nur ein geplanter Lauf je Backup-Tag: fährt der PBS danach erneut hoch, kein zweiter Lauf und kein erneutes Herunterfahren', async () => {
+  const { o, advance, bootPbs, calls, world, db } = await setup();
+  await bootPbs(); await o.tick();
+  await advance(31); await o.tick(); await advance(31); await o.tick();
+  assert.equal(o.lastJob().shutdown, 'angefordert');
+  assert.deepEqual(calls('pbs'), ['poweroff']);
+  // Am selben Tag wieder eingeschaltet (von Hand oder durch die Netzwerkkarte)
+  await advance(30); world.setUp('pbs', true); await engineTick(o, advance);
+  assert.equal(o.job()?.phase === 'läuft', false, 'kein zweiter Lauf');
+  assert.equal(calls('router').length, 1);
+  assert.deepEqual(calls('pbs'), ['poweroff'], 'nicht noch einmal heruntergefahren');
+  assert.equal(world.state.get('pbs').up, true);
+  assert.ok(db.events(20).some((e) => /heute schon gelaufen/.test(e.text)), 'Ereignis erklärt, warum nichts passiert');
+});
+async function engineTick(o, advance) { await advance(1); await advance(25); await o.tick(); await o.tick(); }
