@@ -11,7 +11,7 @@
 /* ---- Farben: 80er Synth-Pop – Neon Gelb, Grün und Blau auf Nachtblau ---- */
 :root {
   color-scheme: dark;
-  --bg: #060818; --panel: rgba(11, 15, 36, .86); --panel2: rgba(34, 48, 92, .45); --text: #ecf5ff; --muted: #a3b6d4; --line: rgba(84, 196, 255, .24);
+  --bg: #020309; --panel: rgba(8, 11, 28, .9); --panel2: rgba(34, 48, 92, .45); --text: #ecf5ff; --muted: #a3b6d4; --line: rgba(84, 196, 255, .24);
   --accent: #38d8ff; --neon-blue: #38d8ff; --neon-green: #3dffa8; --neon-yellow: #ffe94d; --on-accent: #03101c;
   --ok: #3dffa8; --ok-bg: rgba(61, 255, 168, .13); --watch: #ffe94d; --watch-bg: rgba(255, 233, 77, .13); --replace: #ffa24f; --replace-bg: rgba(255, 162, 79, .14);
   --critical: #ff5e8e; --critical-bg: rgba(255, 94, 142, .15); --unknown: #93a6c4; --unknown-bg: rgba(147, 166, 196, .13);
@@ -21,9 +21,9 @@
 * { box-sizing: border-box; }
 html { background: var(--bg); }
 body { margin: 0; min-height: 100vh; color: var(--text); font: 15px/1.55 var(--font-body);
-  background: radial-gradient(ellipse 90% 45% at 50% 62%, rgba(61, 255, 168, .10), transparent 70%),
-              radial-gradient(ellipse 60% 30% at 50% 58%, rgba(255, 233, 77, .07), transparent 70%),
-              linear-gradient(180deg, #04050f 0%, #070b22 45%, #06142a 100%) fixed; }
+  background: radial-gradient(ellipse 90% 45% at 50% 62%, rgba(61, 255, 168, .045), transparent 70%),
+              radial-gradient(ellipse 60% 30% at 50% 58%, rgba(255, 233, 77, .03), transparent 70%),
+              linear-gradient(180deg, #010207 0%, #030513 45%, #030a16 100%) fixed; }
 #app { max-width: 1200px; margin: 0 auto; padding: 0 16px 48px; }
 h1, h2, h3 { line-height: 1.25; margin: 0; }
 h2 { font-size: 1.15rem; }
@@ -242,12 +242,12 @@ body::before { content: ''; position: fixed; z-index: 0; pointer-events: none; l
   background-image: linear-gradient(rgba(56, 216, 255, .30) 1px, transparent 1px), linear-gradient(90deg, rgba(61, 255, 168, .22) 1px, transparent 1px);
   background-size: 64px 64px; transform-origin: 50% 0; transform: perspective(420px) rotateX(68deg) translateY(-64px);
   -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 70%, transparent 100%); mask-image: linear-gradient(180deg, transparent 0%, #000 22%, #000 70%, transparent 100%);
-  opacity: .55; animation: laser-grid 9s linear infinite; }
+  opacity: .4; animation: laser-grid 9s linear infinite; }
 @keyframes laser-grid { to { transform: perspective(420px) rotateX(68deg) translateY(0); } }
 /* Himmel: feines Gitter, Horizontlinie und schwache Scanlines */
 body::after { content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background-image:
-    linear-gradient(180deg, transparent calc(56vh - 1px), rgba(255, 233, 77, .35) 56vh, rgba(61, 255, 168, .18) calc(56vh + 2px), transparent calc(56vh + 3px)),
+    linear-gradient(180deg, transparent calc(56vh - 1px), rgba(255, 233, 77, .22) 56vh, rgba(61, 255, 168, .12) calc(56vh + 2px), transparent calc(56vh + 3px)),
     repeating-linear-gradient(180deg, rgba(255, 255, 255, .018) 0 1px, transparent 1px 3px),
     linear-gradient(rgba(56, 216, 255, .05) 1px, transparent 1px), linear-gradient(90deg, rgba(56, 216, 255, .05) 1px, transparent 1px);
   background-size: 100% 100%, 100% 3px, 80px 80px, 80px 80px;
@@ -266,7 +266,7 @@ th { text-transform: uppercase; letter-spacing: .08em; font-size: .78rem; color:
 .summary { font-size: 1.45rem; font-weight: 600; }
 
 /* Kopfleiste: halbtransparent mit Neon-Kante */
-header.top { background: rgba(5, 7, 22, .82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); margin: 0 -16px; padding: 14px 16px 0; }
+header.top { background: rgba(2, 3, 10, .86); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); margin: 0 -16px; padding: 14px 16px 0; }
 header.top::after { content: ''; display: block; height: 2px; margin: 0 -16px; background: linear-gradient(90deg, transparent, var(--neon-yellow) 20%, var(--neon-green) 50%, var(--neon-blue) 80%, transparent); opacity: .7; }
 nav.tabs { border-bottom: 0; } nav.tabs button { color: var(--muted); font-size: 1.05rem; letter-spacing: .03em; }
 nav.tabs button:hover { color: var(--text); }
@@ -313,3 +313,5 @@ svg.chart text.cell-num { fill: var(--on-accent); }
 .band { opacity: .14; }
 pre.log, code { background: rgba(3, 6, 18, .85); } pre.log { border: 1px solid var(--line); }
 button.linkish { color: var(--neon-blue); }
+th.num { text-align: right; }
+td.num + td:not(.num), th.num + th:not(.num) { padding-left: 28px; }

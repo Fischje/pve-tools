@@ -3,6 +3,10 @@
 Neueste Version oben. Die Oberfläche liest die Versionsnummer und die letzten Einträge aus dieser Datei.
 Bei jeder Auslieferung die dritte Stelle hochzählen und hier einen Eintrag ergänzen (siehe `CLAUDE.md`).
 
+## 0.6.10 – 2026-11-23
+- Hintergrund dunkler, Laser-Gitter etwas zurückhaltender.
+- Tabellen unter „Energie“: Überschriften der Zahlenspalten stehen jetzt rechtsbündig über den Zahlen, mehr Abstand zur Spalte danach.
+
 ## 0.6.9 – 2026-11-21
 - Neuer Look im Stil der 80er (Synth-Pop): Neonfarben Gelb, Grün und Blau auf dunklem Grund, im Hintergrund ein schwaches Laser-Gitter, das langsam wandert.
 - Schriften Afacad Flux (Überschriften, Kennzahlen) und Miranda Sans (Text); sie werden vom Tool selbst geladen, nicht aus dem Internet.

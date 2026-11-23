@@ -90,13 +90,13 @@ function powerSection(pw, data) {
     const rows = meters.map((m, i) => h('tr', {}, h('td', {}, h('span', { class: `sw bar-p${i % 5}`, style: 'display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px' }), h('b', {}, label(m))),
       h('td', { class: 'num' }, m.latest?.error ? h('span', { class: 'bad' }, m.latest.error) : watt(m.latest?.power)), h('td', { class: 'num' }, kwh(m.latest?.today)), h('td', { class: 'num' }, watt(m.avg7d)),
       h('td', { class: 'sub' }, m.latest?.ts ? fmtDT(m.latest.ts) : 'noch nicht gelesen')));
-    parts.push(h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Steckdose', 'jetzt', 'heute', 'Ø 7 Tage', 'zuletzt gelesen'].map((x) => h('th', {}, x)))), h('tbody', {}, rows))));
+    parts.push(h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Steckdose', 'jetzt', 'heute', 'Ø 7 Tage', 'zuletzt gelesen'].map((x, i) => h('th', { class: i >= 1 && i <= 3 ? 'num' : null }, x)))), h('tbody', {}, rows))));
     const legend = meters.map((m, i) => [`bar-p${i % 5}`, label(m)]);
     parts.push(h('div', { class: 'statgrid' },
       figure('Leistung der letzten 24 Stunden', powerChart(meters.map((m, i) => ({ label: label(m), cls: `p${i % 5}`, points: m.series })), { fromMs: now - 864e5, toMs: now, label: 'Leistung je Steckdose, letzte 24 Stunden' }), { legend }),
       figure('Verbrauch je Tag (kWh)', dailyBars((() => { const days = [...new Set(meters.flatMap((m) => m.daily.map((d) => d.day)))].sort().slice(-30); return days.map((day) => ({ day, parts: meters.map((m, i) => ({ cls: `bar-p${i % 5}`, label: label(m), kwh: m.daily.find((d) => d.day === day)?.kwh ?? 0 })) })); })()), { legend, note: 'Aus den Zählerständen der Steckdosen.' })));
     if (pw.changes.length) parts.push(h('h3', {}, 'Was hat eine Änderung gebracht?'), h('p', { class: 'sub' }, 'Mittlere Leistung 24 Stunden vor und nach jeder Energie-Änderung im Tool. Andere Einflüsse (Last, Backups) spielen mit hinein: erst über mehrere Tage aussagekräftig.'),
-      h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Wann', 'Host', 'Änderung', 'vorher', 'nachher', 'Unterschied'].map((x) => h('th', {}, x)))),
+      h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ['Wann', 'Host', 'Änderung', 'vorher', 'nachher', 'Unterschied'].map((x, i) => h('th', { class: i >= 3 ? 'num' : null }, x)))),
         h('tbody', {}, pw.changes.map((c) => { const d = c.before != null && c.after != null ? Math.round((c.after - c.before) * 10) / 10 : null;
           return h('tr', {}, h('td', {}, fmtDT(c.ts)), h('td', {}, data.hosts.find((x) => x.id === c.hostId)?.label ?? c.hostId), h('td', {}, c.text), h('td', { class: 'num' }, watt(c.before)), h('td', { class: 'num' }, `${watt(c.after)}${c.complete ? '' : ' (läuft noch)'}`),
             h('td', { class: `num ${d == null ? '' : d < 0 ? 'better' : 'worse'}` }, d == null ? '–' : `${d > 0 ? '+' : ''}${d.toLocaleString('de-DE')} W`)); })))));
